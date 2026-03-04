@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">MyWallie</string>
+    <string name="title_activity_main">MyWallie</string>
+    <string name="package_name">com.gdevakrishnan.mywallie</string>
+    <string name="custom_url_scheme">com.gdevakrishnan.mywallie</string>
+</resources>
