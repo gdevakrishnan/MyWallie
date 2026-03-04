@@ -185,21 +185,21 @@ const S = `
   .logo span { color: var(--accent); }
   .logo-sub { font-size: 0.7rem; color: var(--muted); font-family: 'DM Mono', monospace; margin-bottom: 36px; letter-spacing: 0.1em; }
   .nav { display: flex; flex-direction: column; gap: 4px; flex: 1; }
-  .nav-item { display: flex; align-items: center; gap: 12px; padding: 11px 14px; border-radius: var(--radius-sm); cursor: pointer; transition: all 0.18s; color: var(--muted); font-weight: 500; font-size: 0.88rem; border: none; background: none; text-align: left; width: 100%; }
+  .nav-item { display: flex; align-items: center; gap: 12px; padding: 11px 14px; border-radius: var(--radius-sm); transition: all 0.18s; color: var(--muted); font-weight: 500; font-size: 0.88rem; border: none; background: none; text-align: left; width: 100%; }
   .nav-item:hover { background: var(--surface2); color: var(--text); }
   .nav-item.active { background: var(--accent); color: #fff; }
   .nav-icon { width: 20px; text-align: center; flex-shrink: 0; display:flex; align-items:center; justify-content:center; }
 
   /* Bottom nav — mobile only */
   .bottom-nav { display: none; position: fixed; bottom: 0; left: 0; right: 0; z-index: 100; background: var(--surface); border-top: 1px solid var(--border); padding: 6px 0 max(8px, env(safe-area-inset-bottom)); justify-content: space-around; align-items: stretch; }
-  .bottom-nav-item { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 6px 8px; border: none; background: none; cursor: pointer; color: var(--muted); font-family: 'Syne', sans-serif; font-size: 0.6rem; font-weight: 600; transition: color 0.15s; flex: 1; min-width: 0; }
+  .bottom-nav-item { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 6px 8px; border: none; background: none; color: var(--muted); font-family: 'Syne', sans-serif; font-size: 0.6rem; font-weight: 600; transition: color 0.15s; flex: 1; min-width: 0; }
   .bottom-nav-item svg { margin-bottom: 1px; }
   .bottom-nav-item.active { color: var(--accent); }
 
   /* File zone */
   .file-zone { margin-top: 24px; border-top: 1px solid var(--border); padding-top: 16px; }
   .file-zone-label { font-size: 0.7rem; color: var(--muted); font-family: 'DM Mono', monospace; letter-spacing: 0.1em; margin-bottom: 10px; }
-  .file-btn { width: 100%; padding: 9px 12px; border-radius: var(--radius-sm); background: var(--surface2); border: 1px dashed var(--border); color: var(--muted); font-size: 0.8rem; font-family: 'Syne', sans-serif; cursor: pointer; transition: all 0.18s; display: flex; align-items: center; gap: 8px; }
+  .file-btn { width: 100%; padding: 9px 12px; border-radius: var(--radius-sm); background: var(--surface2); border: 1px dashed var(--border); color: var(--muted); font-size: 0.8rem; font-family: 'Syne', sans-serif; transition: all 0.18s; display: flex; align-items: center; gap: 8px; }
   .file-btn:hover { border-color: var(--accent); color: var(--accent); }
   .file-status { font-size: 0.72rem; color: var(--income); margin-top: 8px; font-family: 'DM Mono', monospace; line-height: 1.6; }
 
@@ -249,7 +249,7 @@ const S = `
   .amount.income { color: var(--income); font-weight: 700; font-family: 'DM Mono', monospace; }
   .amount.expense { color: var(--expense); font-weight: 700; font-family: 'DM Mono', monospace; }
   .actions { display: flex; gap: 8px; }
-  .btn-icon { background: var(--surface3); border: none; border-radius: 8px; padding: 7px 10px; cursor: pointer; font-size: 0.85rem; transition: all 0.15s; color: var(--muted); }
+  .btn-icon { background: var(--surface3); border: none; border-radius: 8px; padding: 7px 10px; font-size: 0.85rem; transition: all 0.15s; color: var(--muted); }
   .btn-icon:hover { background: var(--accent); color: #fff; }
   .btn-icon.del:hover { background: var(--expense); color: #fff; }
 
@@ -264,7 +264,7 @@ const S = `
   select option { background: var(--surface2); }
   textarea { resize: vertical; min-height: 80px; }
 
-  .btn { display: inline-flex; align-items: center; gap: 8px; padding: 11px 22px; border-radius: var(--radius-sm); border: none; cursor: pointer; font-family: 'Syne', sans-serif; font-weight: 700; font-size: 0.88rem; transition: all 0.18s; }
+  .btn { display: inline-flex; align-items: center; gap: 8px; padding: 11px 22px; border-radius: var(--radius-sm); border: none; font-family: 'Syne', sans-serif; font-weight: 700; font-size: 0.88rem; transition: all 0.18s; }
   .btn-primary { background: var(--accent); color: #fff; }
   .btn-primary:hover { background: #6a58e5; transform: translateY(-1px); }
   .btn-secondary { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
@@ -285,7 +285,7 @@ const S = `
   .filter-bar { display: flex; gap: 12px; margin-bottom: 20px; align-items: center; flex-wrap: wrap; }
   .search-input { flex: 1; min-width: 180px; max-width: 260px; }
   .filter-buttons { display: flex; gap: 8px; flex-wrap: wrap; }
-  .filter-btn { padding: 8px 14px; border-radius: 100px; border: 1px solid var(--border); background: var(--surface2); color: var(--muted); font-family: 'Syne', sans-serif; font-size: 0.8rem; font-weight: 600; cursor: pointer; transition: all 0.15s; }
+  .filter-btn { padding: 8px 14px; border-radius: 100px; border: 1px solid var(--border); background: var(--surface2); color: var(--muted); font-family: 'Syne', sans-serif; font-size: 0.8rem; font-weight: 600; transition: all 0.15s; }
   .filter-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
   .filter-btn:hover:not(.active) { border-color: var(--accent); color: var(--accent); }
 
@@ -308,7 +308,7 @@ const S = `
   .welcome-title { font-size: 1.5rem; font-weight: 800; margin-bottom: 8px; }
   .welcome-sub { color: var(--muted); font-size: 0.88rem; margin-bottom: 32px; line-height: 1.6; }
   .welcome-actions { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
-  .file-input-label { display: inline-flex; align-items: center; gap: 8px; padding: 11px 22px; border-radius: var(--radius-sm); background: var(--accent); color: #fff; font-family: 'Syne', sans-serif; font-weight: 700; font-size: 0.88rem; cursor: pointer; transition: all 0.18s; border: none; }
+  .file-input-label { display: inline-flex; align-items: center; gap: 8px; padding: 11px 22px; border-radius: var(--radius-sm); background: var(--accent); color: #fff; font-family: 'Syne', sans-serif; font-weight: 700; font-size: 0.88rem; transition: all 0.18s; border: none; }
   .file-input-label:hover { background: #6a58e5; transform: translateY(-1px); }
 
   /* Reconnect banner */
@@ -629,7 +629,7 @@ export default function App() {
           </nav>
           <div className="file-zone">
             <div className="file-zone-label">DATA FILE</div>
-            <label className="file-btn" htmlFor="file-pick" style={{ cursor: "pointer" }}>
+            <label className="file-btn" htmlFor="file-pick">
               <FolderOpen size={15} /> Open File
             </label>
             <div style={{ marginTop: 8 }}>
