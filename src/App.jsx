@@ -546,7 +546,7 @@ export default function App() {
 
   const navItems = [
     { id: "dashboard", icon: LayoutDashboard, label: "Dashboard" },
-    { id: "add",       icon: PlusCircle,      label: "Add Transaction" },
+    { id: "add",       icon: PlusCircle,      label: "New Transaction" },
     { id: "list",      icon: List,            label: "Transactions" },
     { id: "reports",   icon: BarChart2,       label: "Reports" },
   ];
@@ -798,7 +798,7 @@ function AddPage({ onAdd, onUpdate, editTx }) {
   return (
     <div>
       <div className="page-header">
-        <div className="page-title">{editTx ? "Edit Transaction" : "Add Transaction"}</div>
+        <div className="page-title">{editTx ? "Edit Transaction" : "New Transaction"}</div>
         <div className="page-sub">{editTx ? `Editing ID: ${editTx.ID}` : "Record a new income or expense"}</div>
       </div>
       <div className="form-card">
