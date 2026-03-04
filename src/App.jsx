@@ -546,7 +546,7 @@ export default function App() {
 
   const navItems = [
     { id: "dashboard", icon: LayoutDashboard, label: "Dashboard" },
-    { id: "add",       icon: PlusCircle,      label: "Add" },
+    { id: "add",       icon: PlusCircle,      label: "Add Transaction" },
     { id: "list",      icon: List,            label: "Transactions" },
     { id: "reports",   icon: BarChart2,       label: "Reports" },
   ];
@@ -700,7 +700,7 @@ function DashboardPage({ summary, transactions }) {
                 <Pie data={[{ name: "Income", value: summary.income }, { name: "Expense", value: summary.expense }]} cx="50%" cy="50%" innerRadius={55} outerRadius={85} paddingAngle={4} dataKey="value">
                   <Cell fill="#4df7c8" /><Cell fill="#f74d8a" />
                 </Pie>
-                <Tooltip formatter={v => fmt(v)} contentStyle={{ background: "#1a1a26", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, color: "#f0eeff" }} />
+                <Tooltip formatter={v => fmt(v)} contentStyle={{ background: "#7c6af7", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, color: "#f0eeff" }} />
                 <Legend formatter={v => <span style={{ color: "#f0eeff", fontSize: "0.8rem" }}>{v}</span>} />
               </PieChart>
             </ResponsiveContainer>
@@ -1003,7 +1003,7 @@ function ReportsPage({ transactions, toast }) {
                   <Pie data={[{ name: "Income", value: income }, { name: "Expense", value: expense }]} cx="50%" cy="50%" innerRadius={60} outerRadius={90} paddingAngle={5} dataKey="value">
                     <Cell fill="#4df7c8" /><Cell fill="#f74d8a" />
                   </Pie>
-                  <Tooltip formatter={v => fmt(v)} contentStyle={{ background: "#1a1a26", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, color: "#f0eeff" }} />
+                  <Tooltip formatter={v => fmt(v)} contentStyle={{ background: "#7c6af7", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, color: "#f0eeff" }} />
                   <Legend formatter={v => <span style={{ color: "#f0eeff", fontSize: "0.8rem" }}>{v}</span>} />
                 </PieChart>
               </ResponsiveContainer>
