@@ -1,4 +1,4 @@
-# Spend. — Personal Expense Tracker
+# MyWallie — Personal Expense Tracker
 
 A complete ReactJS expense tracker using Excel as the only data store.
 

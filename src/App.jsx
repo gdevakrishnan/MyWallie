@@ -580,7 +580,7 @@ export default function App() {
       mainContent = (
         <div className="welcome-wrap">
           <div className="welcome-icon"><FileSpreadsheet size={56} strokeWidth={1.2} /></div>
-          <div className="welcome-title">Welcome to Spend.</div>
+          <div className="welcome-title">Welcome to MyWallie</div>
           <div className="welcome-sub">
             Select your <strong>expenses.xlsx</strong> to get started.<br />
             The app saves changes directly back to the file — no repeated download dialogs.
@@ -617,7 +617,7 @@ export default function App() {
       <div className="app">
         {/* Sidebar */}
         <aside className="sidebar">
-          <div className="logo">Spend<span>.</span></div>
+          <div className="logo">My<span>Wallie</span></div>
           <div className="logo-sub">EXPENSE TRACKER</div>
           <nav className="nav">
             {navItems.map(n => (
