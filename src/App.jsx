@@ -6,16 +6,43 @@ import isBetween from "dayjs/plugin/isBetween";
 import isSameOrBefore from "dayjs/plugin/isSameOrBefore";
 import isSameOrAfter from "dayjs/plugin/isSameOrAfter";
 import weekOfYear from "dayjs/plugin/weekOfYear";
+import { Filesystem, Directory } from "@capacitor/filesystem";
 import {
-  PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid,
-  Tooltip, Legend, ResponsiveContainer
+  PieChart,
+  Pie,
+  Cell,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
 } from "recharts";
 import {
-  LayoutDashboard, PlusCircle, List, BarChart2,
-  FolderOpen, FilePlus, CheckCircle, XCircle, Info,
-  Pencil, Trash2, Upload, Sparkles, FileSpreadsheet,
-  TrendingUp, TrendingDown, Wallet, Activity,
-  CheckCheck, AlertTriangle, RefreshCw, Download
+  LayoutDashboard,
+  PlusCircle,
+  List,
+  BarChart2,
+  FolderOpen,
+  FilePlus,
+  CheckCircle,
+  XCircle,
+  Info,
+  Pencil,
+  Trash2,
+  Upload,
+  Sparkles,
+  FileSpreadsheet,
+  TrendingUp,
+  TrendingDown,
+  Wallet,
+  Activity,
+  CheckCheck,
+  AlertTriangle,
+  RefreshCw,
+  Download,
 } from "lucide-react";
 
 dayjs.extend(isBetween);
@@ -34,8 +61,8 @@ const IDB_KEY = "active_file_handle";
 function openIDB() {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(IDB_DB, 1);
-    req.onupgradeneeded = e => e.target.result.createObjectStore(IDB_STORE);
-    req.onsuccess = e => resolve(e.target.result);
+    req.onupgradeneeded = (e) => e.target.result.createObjectStore(IDB_STORE);
+    req.onsuccess = (e) => resolve(e.target.result);
     req.onerror = () => reject(req.error);
   });
 }
@@ -49,7 +76,9 @@ async function idbSet(val) {
       tx.oncomplete = () => res();
       tx.onerror = () => rej(tx.error);
     });
-  } catch { /* silently ignore */ }
+  } catch {
+    /* silently ignore */
+  }
 }
 
 async function idbGet() {
@@ -61,7 +90,9 @@ async function idbGet() {
       req.onsuccess = () => res(req.result ?? null);
       req.onerror = () => rej(req.error);
     });
-  } catch { return null; }
+  } catch {
+    return null;
+  }
 }
 
 async function idbDel() {
@@ -73,28 +104,68 @@ async function idbDel() {
       tx.oncomplete = () => res();
       tx.onerror = () => rej(tx.error);
     });
-  } catch { /* silently ignore */ }
+  } catch {
+    /* silently ignore */
+  }
 }
 
 // ─── localStorage helpers (for filename display only) ─────────────────────────
 const LS_KEY = "mywallie_file_name";
-const lsSet = (v) => { try { localStorage.setItem(LS_KEY, v); } catch { } };
-const lsGet = () => { try { return localStorage.getItem(LS_KEY); } catch { return null; } };
-const lsDel = () => { try { localStorage.removeItem(LS_KEY); } catch { } };
+const lsSet = (v) => {
+  try {
+    localStorage.setItem(LS_KEY, v);
+  } catch {}
+};
+const lsGet = () => {
+  try {
+    return localStorage.getItem(LS_KEY);
+  } catch {
+    return null;
+  }
+};
+const lsDel = () => {
+  try {
+    localStorage.removeItem(LS_KEY);
+  } catch {}
+};
 
 // ─── Excel Service ────────────────────────────────────────────────────────────
 const SHEET_NAME = "Transactions";
-const HEADERS = ["ID", "Date", "Type", "Category", "Amount", "Notes", "CreatedAt"];
+const HEADERS = [
+  "ID",
+  "Date",
+  "Type",
+  "Category",
+  "Amount",
+  "Notes",
+  "CreatedAt",
+];
 
 const excelService = {
   createWorkbook(transactions = []) {
     const wb = XLSX.utils.book_new();
     const rows = [
       HEADERS,
-      ...transactions.map(t => [t.ID, t.Date, t.Type, t.Category, t.Amount, t.Notes, t.CreatedAt])
+      ...transactions.map((t) => [
+        t.ID,
+        t.Date,
+        t.Type,
+        t.Category,
+        t.Amount,
+        t.Notes,
+        t.CreatedAt,
+      ]),
     ];
     const ws = XLSX.utils.aoa_to_sheet(rows);
-    ws["!cols"] = [{ wch: 15 }, { wch: 12 }, { wch: 10 }, { wch: 15 }, { wch: 12 }, { wch: 30 }, { wch: 20 }];
+    ws["!cols"] = [
+      { wch: 15 },
+      { wch: 12 },
+      { wch: 10 },
+      { wch: 15 },
+      { wch: 12 },
+      { wch: 30 },
+      { wch: 20 },
+    ];
     XLSX.utils.book_append_sheet(wb, ws, SHEET_NAME);
     return wb;
   },
@@ -109,15 +180,18 @@ const excelService = {
     if (!ws) throw new Error(`Sheet "${SHEET_NAME}" not found in file`);
     const rows = XLSX.utils.sheet_to_json(ws, { header: 1 });
     if (rows.length <= 1) return [];
-    return rows.slice(1).filter(r => r[0]).map(r => ({
-      ID: String(r[0] || ""),
-      Date: r[1] ? String(r[1]) : dayjs().format("YYYY-MM-DD"),
-      Type: r[2] || "Expense",
-      Category: r[3] || "",
-      Amount: Number(r[4]) || 0,
-      Notes: r[5] || "",
-      CreatedAt: r[6] || new Date().toISOString(),
-    }));
+    return rows
+      .slice(1)
+      .filter((r) => r[0])
+      .map((r) => ({
+        ID: String(r[0] || ""),
+        Date: r[1] ? String(r[1]) : dayjs().format("YYYY-MM-DD"),
+        Type: r[2] || "Expense",
+        Category: r[3] || "",
+        Amount: Number(r[4]) || 0,
+        Notes: r[5] || "",
+        CreatedAt: r[6] || new Date().toISOString(),
+      }));
   },
 
   async writeToHandle(handle, transactions) {
@@ -134,16 +208,39 @@ const excelService = {
 
   generateReport(transactions) {
     const wb = XLSX.utils.book_new();
-    const income = transactions.filter(t => t.Type === "Income").reduce((s, t) => s + t.Amount, 0);
-    const expense = transactions.filter(t => t.Type === "Expense").reduce((s, t) => s + t.Amount, 0);
+    const income = transactions
+      .filter((t) => t.Type === "Income")
+      .reduce((s, t) => s + t.Amount, 0);
+    const expense = transactions
+      .filter((t) => t.Type === "Expense")
+      .reduce((s, t) => s + t.Amount, 0);
     const rows = [
       HEADERS,
-      ...transactions.map(t => [t.ID, t.Date, t.Type, t.Category, t.Amount, t.Notes, t.CreatedAt]),
+      ...transactions.map((t) => [
+        t.ID,
+        t.Date,
+        t.Type,
+        t.Category,
+        t.Amount,
+        t.Notes,
+        t.CreatedAt,
+      ]),
       [],
-      ["Summary"], ["Total Income", income], ["Total Expense", expense], ["Net Balance", income - expense],
+      ["Summary"],
+      ["Total Income", income],
+      ["Total Expense", expense],
+      ["Net Balance", income - expense],
     ];
     const ws = XLSX.utils.aoa_to_sheet(rows);
-    ws["!cols"] = [{ wch: 15 }, { wch: 12 }, { wch: 10 }, { wch: 15 }, { wch: 12 }, { wch: 30 }, { wch: 20 }];
+    ws["!cols"] = [
+      { wch: 15 },
+      { wch: 12 },
+      { wch: 10 },
+      { wch: 15 },
+      { wch: 12 },
+      { wch: 30 },
+      { wch: 20 },
+    ];
     XLSX.utils.book_append_sheet(wb, ws, "Report");
     return wb;
   },
@@ -153,14 +250,17 @@ const excelService = {
 const dateUtils = {
   filterByPeriod(transactions, period, from, to) {
     const today = dayjs();
-    return transactions.filter(t => {
+    return transactions.filter((t) => {
       const d = dayjs(t.Date);
       if (period === "daily") return d.isSame(today, "day");
       if (period === "weekly") return d.isSame(today, "week");
       if (period === "monthly") return d.isSame(today, "month");
       if (period === "yearly") return d.isSame(today, "year");
       if (period === "custom" && from && to)
-        return d.isSameOrAfter(dayjs(from), "day") && d.isSameOrBefore(dayjs(to), "day");
+        return (
+          d.isSameOrAfter(dayjs(from), "day") &&
+          d.isSameOrBefore(dayjs(to), "day")
+        );
       return true;
     });
   },
@@ -352,9 +452,15 @@ const S = `
 function Toast({ toasts }) {
   return (
     <div className="toast-wrap">
-      {toasts.map(t => (
+      {toasts.map((t) => (
         <div key={t.id} className={`toast ${t.type}`}>
-          {t.type === "success" ? <CheckCircle size={16} /> : t.type === "error" ? <XCircle size={16} /> : <Info size={16} />}
+          {t.type === "success" ? (
+            <CheckCircle size={16} />
+          ) : t.type === "error" ? (
+            <XCircle size={16} />
+          ) : (
+            <Info size={16} />
+          )}
           {t.msg}
         </div>
       ))}
@@ -383,8 +489,8 @@ export default function App() {
 
   const toast = useCallback((msg, type = "success") => {
     const id = Date.now();
-    setToasts(p => [...p, { id, msg, type }]);
-    setTimeout(() => setToasts(p => p.filter(t => t.id !== id)), 3200);
+    setToasts((p) => [...p, { id, msg, type }]);
+    setTimeout(() => setToasts((p) => p.filter((t) => t.id !== id)), 3200);
   }, []);
 
   // ── On mount: try to restore a previously-saved FileSystemFileHandle from IDB
@@ -425,66 +531,80 @@ export default function App() {
   }, []);
 
   // ── Core: save updated transactions back to the file (in-place or download)
-  const persist = useCallback(async (txList) => {
-    if (fileHandleRef.current) {
-      try {
-        await excelService.writeToHandle(fileHandleRef.current, txList);
-      } catch (e) {
-        // Permission revoked mid-session — fall back to download
+  const persist = useCallback(
+    async (txList) => {
+      if (fileHandleRef.current) {
+        try {
+          await excelService.writeToHandle(fileHandleRef.current, txList);
+        } catch (e) {
+          // Permission revoked mid-session — fall back to download
+          excelService.downloadFile(txList, fileName || "expenses.xlsx");
+          toast("Permission lost — file downloaded instead", "info");
+        }
+      } else {
         excelService.downloadFile(txList, fileName || "expenses.xlsx");
-        toast("Permission lost — file downloaded instead", "info");
       }
-    } else {
-      excelService.downloadFile(txList, fileName || "expenses.xlsx");
-    }
-  }, [fileName]);
+    },
+    [fileName],
+  );
 
   // ── Called when <input type="file"> fires (works on all browsers)
-  const handleInputChange = useCallback(async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    e.target.value = ""; // reset so same file can be picked again
+  const handleInputChange = useCallback(
+    async (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      e.target.value = ""; // reset so same file can be picked again
 
-    try {
-      const parsed = excelService.parse(await file.arrayBuffer());
+      try {
+        const parsed = excelService.parse(await file.arrayBuffer());
 
-      // On Chrome/Edge we can request a writable handle for the chosen file
-      // via showOpenFilePicker — but input:file doesn't give us one directly.
-      // So we use showOpenFilePicker when available to get the handle after
-      // the user has already confirmed which file they want via the input.
-      // For Firefox/Safari we store null and fall back to download-on-save.
-      let handle = null;
-      if ("showOpenFilePicker" in window) {
-        try {
-          // User already picked the file via the input — now ask the browser
-          // for a writable handle to the same file via the picker API.
-          // We can't skip the dialog, but we pre-fill the file name so it's
-          // a one-click confirm for the user.
-          const [h] = await window.showOpenFilePicker({
-            types: [{ description: "Excel Files", accept: { "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"] } }],
-            multiple: false,
-          });
-          handle = h;
-        } catch {
-          // User cancelled the second picker or browser refused — no handle, use download fallback
+        // On Chrome/Edge we can request a writable handle for the chosen file
+        // via showOpenFilePicker — but input:file doesn't give us one directly.
+        // So we use showOpenFilePicker when available to get the handle after
+        // the user has already confirmed which file they want via the input.
+        // For Firefox/Safari we store null and fall back to download-on-save.
+        let handle = null;
+        if ("showOpenFilePicker" in window) {
+          try {
+            // User already picked the file via the input — now ask the browser
+            // for a writable handle to the same file via the picker API.
+            // We can't skip the dialog, but we pre-fill the file name so it's
+            // a one-click confirm for the user.
+            const [h] = await window.showOpenFilePicker({
+              types: [
+                {
+                  description: "Excel Files",
+                  accept: {
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
+                      [".xlsx"],
+                  },
+                },
+              ],
+              multiple: false,
+            });
+            handle = h;
+          } catch {
+            // User cancelled the second picker or browser refused — no handle, use download fallback
+          }
         }
+
+        fileHandleRef.current = handle;
+        if (handle) await idbSet(handle);
+        else await idbDel();
+
+        setFileName(file.name);
+        lsSet(file.name);
+        setTransactions(parsed);
+        setFileLoaded(true);
+        setStatus("ready");
+
+        toast(`Loaded "${file.name}" — ${parsed.length} records`, "success");
+      } catch (err) {
+        toast("Failed to read file: " + err.message, "error");
       }
-
-      fileHandleRef.current = handle;
-      if (handle) await idbSet(handle);
-      else await idbDel();
-
-      setFileName(file.name);
-      lsSet(file.name);
-      setTransactions(parsed);
-      setFileLoaded(true);
-      setStatus("ready");
-
-      toast(`Loaded "${file.name}" — ${parsed.length} records`, "success");
-    } catch (err) {
-      toast("Failed to read file: " + err.message, "error");
-    }
-  }, [toast]);
+    },
+    [toast],
+  );
 
   // ── Triggered when user clicks "Open File" on the reconnect screen
   // We already have a stale handle in fileHandleRef — request permission for it.
@@ -504,7 +624,9 @@ export default function App() {
           toast(`Resumed "${file.name}"`, "success");
           return;
         }
-      } catch { /* fall through to input */ }
+      } catch {
+        /* fall through to input */
+      }
     }
     // Permission denied or no handle — open input picker
     inputRef.current.click();
@@ -522,30 +644,60 @@ export default function App() {
   }, []);
 
   // ── CRUD
-  const addTransaction = useCallback((tx) => {
-    setTransactions(prev => { const u = [...prev, tx]; persist(u); return u; });
-    toast("Transaction saved", "success");
-  }, [persist]);
+  const addTransaction = useCallback(
+    (tx) => {
+      setTransactions((prev) => {
+        const u = [...prev, tx];
+        persist(u);
+        return u;
+      });
+      toast("Transaction saved", "success");
+    },
+    [persist],
+  );
 
-  const updateTransaction = useCallback((tx) => {
-    if (!tx) {
+  const updateTransaction = useCallback(
+    (tx) => {
+      if (!tx) {
+        setEditTx(null);
+        return;
+      }
+      setTransactions((prev) => {
+        const u = prev.map((t) => (t.ID === tx.ID ? tx : t));
+        persist(u);
+        return u;
+      });
       setEditTx(null);
-      return;
-    }
-    setTransactions(prev => { const u = prev.map(t => t.ID === tx.ID ? tx : t); persist(u); return u; });
-    setEditTx(null);
-    toast("Transaction updated", "success");
-  }, [persist]);
+      toast("Transaction updated", "success");
+    },
+    [persist],
+  );
 
-  const deleteTransaction = useCallback((id) => {
-    setTransactions(prev => { const u = prev.filter(t => t.ID !== id); persist(u); return u; });
-    toast("Deleted", "success");
-  }, [persist]);
+  const deleteTransaction = useCallback(
+    (id) => {
+      setTransactions((prev) => {
+        const u = prev.filter((t) => t.ID !== id);
+        persist(u);
+        return u;
+      });
+      toast("Deleted", "success");
+    },
+    [persist],
+  );
 
   const summary = useMemo(() => {
-    const income = transactions.filter(t => t.Type === "Income").reduce((s, t) => s + t.Amount, 0);
-    const expense = transactions.filter(t => t.Type === "Expense").reduce((s, t) => s + t.Amount, 0);
-    return { income, expense, net: income - expense, count: transactions.length };
+    const income = transactions
+      .filter((t) => t.Type === "Income")
+      .reduce((s, t) => s + t.Amount, 0);
+    const expense = transactions
+      .filter((t) => t.Type === "Expense")
+      .reduce((s, t) => s + t.Amount, 0);
+    return {
+      income,
+      expense,
+      net: income - expense,
+      count: transactions.length,
+    };
   }, [transactions]);
 
   const navItems = [
@@ -556,29 +708,42 @@ export default function App() {
   ];
 
   const goPage = (id) => {
-    if (id !== 'add') setEditTx(null);
+    if (id !== "add") setEditTx(null);
     setPage(id);
   };
 
   // ── Render: decide what to show in main area
   let mainContent;
   if (status === "restoring") {
-    mainContent = <div className="loading" style={{ height: "60vh" }}>Loading…</div>;
+    mainContent = (
+      <div className="loading" style={{ height: "60vh" }}>
+        Loading…
+      </div>
+    );
   } else if (!fileLoaded) {
     if (status === "needs-pick") {
       mainContent = (
         <div className="reconnect-wrap">
           <div className="reconnect-card">
-            <div className="reconnect-icon"><FolderOpen size={48} strokeWidth={1.5} /></div>
+            <div className="reconnect-icon">
+              <FolderOpen size={48} strokeWidth={1.5} />
+            </div>
             <div className="reconnect-title">Welcome back!</div>
             <div className="reconnect-sub">Last used file:</div>
-            <div className="reconnect-filename">{fileName || "expenses.xlsx"}</div>
+            <div className="reconnect-filename">
+              {fileName || "expenses.xlsx"}
+            </div>
             <div className="reconnect-sub" style={{ marginBottom: 24 }}>
-              Click <strong>Open File</strong> to resume — the app needs your permission to access it again.
+              Click <strong>Open File</strong> to resume — the app needs your
+              permission to access it again.
             </div>
             <div className="reconnect-actions">
-              <button className="btn btn-primary" onClick={handleReconnect}><FolderOpen size={16} /> Open File</button>
-              <button className="btn btn-secondary" onClick={handleNewFile}>Start Fresh</button>
+              <button className="btn btn-primary" onClick={handleReconnect}>
+                <FolderOpen size={16} /> Open File
+              </button>
+              <button className="btn btn-secondary" onClick={handleNewFile}>
+                Start Fresh
+              </button>
             </div>
           </div>
         </div>
@@ -586,29 +751,53 @@ export default function App() {
     } else {
       mainContent = (
         <div className="welcome-wrap">
-          <div className="welcome-icon"><FileSpreadsheet size={56} strokeWidth={1.2} /></div>
+          <div className="welcome-icon">
+            <FileSpreadsheet size={56} strokeWidth={1.2} />
+          </div>
           <div className="welcome-title">Welcome to MyWallie.</div>
           <div className="welcome-sub">
-            Select your <strong>expenses.xlsx</strong> to get started.<br />
-            The app saves changes directly back to the file — no repeated download dialogs.
+            Select your <strong>expenses.xlsx</strong> to get started.
+            <br />
+            The app saves changes directly back to the file — no repeated
+            download dialogs.
           </div>
           <div className="welcome-actions">
             <label className="file-input-label" htmlFor="file-pick">
               <FolderOpen size={18} /> Select File
             </label>
-            <button className="btn btn-secondary" onClick={handleNewFile}><FilePlus size={16} /> New File</button>
+            <button className="btn btn-secondary" onClick={handleNewFile}>
+              <FilePlus size={16} /> New File
+            </button>
           </div>
         </div>
       );
     }
   } else {
-    if (page === "dashboard") mainContent = <DashboardPage summary={summary} transactions={transactions} />;
-    else if (page === "add") mainContent = <AddPage onAdd={addTransaction} onUpdate={updateTransaction} editTx={editTx} />;
-    else if (page === "list") mainContent = <ListPage transactions={transactions} onEdit={tx => {
-      setEditTx(tx);
-      goPage("add");
-    }} onDelete={deleteTransaction} />;
-    else mainContent = <ReportsPage transactions={transactions} toast={toast} />;
+    if (page === "dashboard")
+      mainContent = (
+        <DashboardPage summary={summary} transactions={transactions} />
+      );
+    else if (page === "add")
+      mainContent = (
+        <AddPage
+          onAdd={addTransaction}
+          onUpdate={updateTransaction}
+          editTx={editTx}
+        />
+      );
+    else if (page === "list")
+      mainContent = (
+        <ListPage
+          transactions={transactions}
+          onEdit={(tx) => {
+            setEditTx(tx);
+            goPage("add");
+          }}
+          onDelete={deleteTransaction}
+        />
+      );
+    else
+      mainContent = <ReportsPage transactions={transactions} toast={toast} />;
   }
 
   return (
@@ -627,11 +816,17 @@ export default function App() {
       <div className="app">
         {/* Sidebar */}
         <aside className="sidebar">
-          <div className="logo">My<span>Wallie</span></div>
+          <div className="logo">
+            My<span>Wallie</span>
+          </div>
           <div className="logo-sub">EXPENSE TRACKER</div>
           <nav className="nav">
-            {navItems.map(n => (
-              <button key={n.id} className={`nav-item ${page === n.id ? "active" : ""}`} onClick={() => goPage(n.id)}>
+            {navItems.map((n) => (
+              <button
+                key={n.id}
+                className={`nav-item ${page === n.id ? "active" : ""}`}
+                onClick={() => goPage(n.id)}
+              >
                 <n.icon size={18} />
                 <span>{n.label}</span>
               </button>
@@ -639,7 +834,11 @@ export default function App() {
           </nav>
           <div className="file-zone">
             <div className="file-zone-label">DATA FILE</div>
-            <label className="file-btn" htmlFor="file-pick" style={{ cursor: "pointer" }}>
+            <label
+              className="file-btn"
+              htmlFor="file-pick"
+              style={{ cursor: "pointer" }}
+            >
               <FolderOpen size={15} /> Open File
             </label>
             <div style={{ marginTop: 8 }}>
@@ -649,9 +848,22 @@ export default function App() {
             </div>
             {fileLoaded && (
               <div className="file-status">
-                {fileHandleRef.current ? <CheckCircle size={11} style={{ display: "inline", color: "var(--income)" }} /> : <AlertTriangle size={11} style={{ display: "inline", color: "var(--muted)" }} />} {fileName}
+                {fileHandleRef.current ? (
+                  <CheckCircle
+                    size={11}
+                    style={{ display: "inline", color: "var(--income)" }}
+                  />
+                ) : (
+                  <AlertTriangle
+                    size={11}
+                    style={{ display: "inline", color: "var(--muted)" }}
+                  />
+                )}{" "}
+                {fileName}
                 <br />
-                <span style={{ opacity: 0.7 }}>{transactions.length} records</span>
+                <span style={{ opacity: 0.7 }}>
+                  {transactions.length} records
+                </span>
               </div>
             )}
           </div>
@@ -659,17 +871,19 @@ export default function App() {
 
         {/* Bottom nav — mobile */}
         <nav className="bottom-nav">
-          {navItems.map(n => (
-            <button key={n.id} className={`bottom-nav-item ${page === n.id ? "active" : ""}`} onClick={() => goPage(n.id)}>
+          {navItems.map((n) => (
+            <button
+              key={n.id}
+              className={`bottom-nav-item ${page === n.id ? "active" : ""}`}
+              onClick={() => goPage(n.id)}
+            >
               <n.icon size={20} />
               <span>{n.label}</span>
             </button>
           ))}
         </nav>
 
-        <main className="main">
-          {mainContent}
-        </main>
+        <main className="main">{mainContent}</main>
 
         <Toast toasts={toasts} />
       </div>
@@ -679,13 +893,27 @@ export default function App() {
 
 // ─── Dashboard ────────────────────────────────────────────────────────────────
 function DashboardPage({ summary, transactions }) {
-  const fmt = n => new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(n);
-  const recent = [...transactions].sort((a, b) => dayjs(b.Date).valueOf() - dayjs(a.Date).valueOf()).slice(0, 5);
+  const fmt = (n) =>
+    new Intl.NumberFormat("en-IN", {
+      style: "currency",
+      currency: "INR",
+      maximumFractionDigits: 0,
+    }).format(n);
+  const recent = [...transactions]
+    .sort((a, b) => dayjs(b.Date).valueOf() - dayjs(a.Date).valueOf())
+    .slice(0, 5);
 
   const catData = useMemo(() => {
     const map = {};
-    transactions.filter(t => t.Type === "Expense").forEach(t => { map[t.Category] = (map[t.Category] || 0) + t.Amount; });
-    return Object.entries(map).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value).slice(0, 6);
+    transactions
+      .filter((t) => t.Type === "Expense")
+      .forEach((t) => {
+        map[t.Category] = (map[t.Category] || 0) + t.Amount;
+      });
+    return Object.entries(map)
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 6);
   }, [transactions]);
 
   return (
@@ -695,10 +923,36 @@ function DashboardPage({ summary, transactions }) {
         <div className="page-sub">Overview of all your finances</div>
       </div>
       <div className="cards">
-        <div className="card"><div className="card-label">TOTAL INCOME</div><div className="card-value income">{fmt(summary.income)}</div><div className="card-sub">{transactions.filter(t => t.Type === "Income").length} entries</div></div>
-        <div className="card"><div className="card-label">TOTAL EXPENSE</div><div className="card-value expense">{fmt(summary.expense)}</div><div className="card-sub">{transactions.filter(t => t.Type === "Expense").length} entries</div></div>
-        <div className="card"><div className="card-label">NET BALANCE</div><div className={`card-value net ${summary.net >= 0 ? "pos" : "neg"}`}>{fmt(summary.net)}</div><div className="card-sub">{summary.net >= 0 ? "Surplus" : "Deficit"}</div></div>
-        <div className="card"><div className="card-label">TRANSACTIONS</div><div className="card-value" style={{ color: "var(--accent)" }}>{summary.count}</div><div className="card-sub">Total records</div></div>
+        <div className="card">
+          <div className="card-label">TOTAL INCOME</div>
+          <div className="card-value income">{fmt(summary.income)}</div>
+          <div className="card-sub">
+            {transactions.filter((t) => t.Type === "Income").length} entries
+          </div>
+        </div>
+        <div className="card">
+          <div className="card-label">TOTAL EXPENSE</div>
+          <div className="card-value expense">{fmt(summary.expense)}</div>
+          <div className="card-sub">
+            {transactions.filter((t) => t.Type === "Expense").length} entries
+          </div>
+        </div>
+        <div className="card">
+          <div className="card-label">NET BALANCE</div>
+          <div className={`card-value net ${summary.net >= 0 ? "pos" : "neg"}`}>
+            {fmt(summary.net)}
+          </div>
+          <div className="card-sub">
+            {summary.net >= 0 ? "Surplus" : "Deficit"}
+          </div>
+        </div>
+        <div className="card">
+          <div className="card-label">TRANSACTIONS</div>
+          <div className="card-value" style={{ color: "var(--accent)" }}>
+            {summary.count}
+          </div>
+          <div className="card-sub">Total records</div>
+        </div>
       </div>
 
       {transactions.length > 0 && (
@@ -707,23 +961,70 @@ function DashboardPage({ summary, transactions }) {
             <div className="chart-title">Income vs Expense</div>
             <ResponsiveContainer width="100%" height={220}>
               <PieChart>
-                <Pie data={[{ name: "Income", value: summary.income }, { name: "Expense", value: summary.expense }]} cx="50%" cy="50%" innerRadius={55} outerRadius={85} paddingAngle={4} dataKey="value">
-                  <Cell fill="#4df7c8" /><Cell fill="#f74d8a" />
+                <Pie
+                  data={[
+                    { name: "Income", value: summary.income },
+                    { name: "Expense", value: summary.expense },
+                  ]}
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={55}
+                  outerRadius={85}
+                  paddingAngle={4}
+                  dataKey="value"
+                >
+                  <Cell fill="#4df7c8" />
+                  <Cell fill="#f74d8a" />
                 </Pie>
-                <Tooltip formatter={v => fmt(v)} contentStyle={{ background: "#7c6af7", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, color: "#f0eeff" }} />
-                <Legend formatter={v => <span style={{ color: "#f0eeff", fontSize: "0.8rem" }}>{v}</span>} />
+                <Tooltip
+                  formatter={(v) => fmt(v)}
+                  contentStyle={{
+                    background: "#7c6af7",
+                    border: "1px solid rgba(255,255,255,0.08)",
+                    borderRadius: 10,
+                    color: "#f0eeff",
+                  }}
+                />
+                <Legend
+                  formatter={(v) => (
+                    <span style={{ color: "#f0eeff", fontSize: "0.8rem" }}>
+                      {v}
+                    </span>
+                  )}
+                />
               </PieChart>
             </ResponsiveContainer>
           </div>
           <div className="chart-card">
             <div className="chart-title">Top Expense Categories</div>
-            {catData.length === 0 ? <div className="loading">No expense data</div> : (
+            {catData.length === 0 ? (
+              <div className="loading">No expense data</div>
+            ) : (
               <ResponsiveContainer width="100%" height={220}>
-                <BarChart data={catData} margin={{ top: 0, right: 0, left: 0, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-                  <XAxis dataKey="name" tick={{ fill: "rgba(240,238,255,0.45)", fontSize: 11 }} />
-                  <YAxis tick={{ fill: "rgba(240,238,255,0.45)", fontSize: 11 }} />
-                  <Tooltip formatter={v => fmt(v)} contentStyle={{ background: "#1a1a26", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, color: "#f0eeff" }} />
+                <BarChart
+                  data={catData}
+                  margin={{ top: 0, right: 0, left: 0, bottom: 0 }}
+                >
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                    stroke="rgba(255,255,255,0.05)"
+                  />
+                  <XAxis
+                    dataKey="name"
+                    tick={{ fill: "rgba(240,238,255,0.45)", fontSize: 11 }}
+                  />
+                  <YAxis
+                    tick={{ fill: "rgba(240,238,255,0.45)", fontSize: 11 }}
+                  />
+                  <Tooltip
+                    formatter={(v) => fmt(v)}
+                    contentStyle={{
+                      background: "#1a1a26",
+                      border: "1px solid rgba(255,255,255,0.08)",
+                      borderRadius: 10,
+                      color: "#f0eeff",
+                    }}
+                  />
                   <Bar dataKey="value" fill="#7c6af7" radius={[6, 6, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
@@ -734,33 +1035,71 @@ function DashboardPage({ summary, transactions }) {
 
       {recent.length > 0 && (
         <div className="table-wrap" style={{ marginTop: 24 }}>
-          <div className="table-header"><div className="table-title">Recent Transactions</div></div>
+          <div className="table-header">
+            <div className="table-title">Recent Transactions</div>
+          </div>
           <div className="desktop-table">
             <table>
-              <thead><tr><th>Date</th><th>Type</th><th>Category</th><th>Amount</th><th>Notes</th></tr></thead>
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Type</th>
+                  <th>Category</th>
+                  <th>Amount</th>
+                  <th>Notes</th>
+                </tr>
+              </thead>
               <tbody>
-                {recent.map(t => (
+                {recent.map((t) => (
                   <tr key={t.ID}>
-                    <td style={{ fontFamily: "DM Mono, monospace", fontSize: "0.82rem" }}>{t.Date}</td>
-                    <td><span className={`badge ${t.Type.toLowerCase()}`}>{t.Type}</span></td>
+                    <td
+                      style={{
+                        fontFamily: "DM Mono, monospace",
+                        fontSize: "0.82rem",
+                      }}
+                    >
+                      {t.Date}
+                    </td>
+                    <td>
+                      <span className={`badge ${t.Type.toLowerCase()}`}>
+                        {t.Type}
+                      </span>
+                    </td>
                     <td>{t.Category}</td>
-                    <td><span className={`amount ${t.Type.toLowerCase()}`}>{t.Type === "Income" ? "+" : "−"}₹{t.Amount.toLocaleString()}</span></td>
-                    <td style={{ color: "var(--muted)", fontSize: "0.82rem" }}>{t.Notes || "—"}</td>
+                    <td>
+                      <span className={`amount ${t.Type.toLowerCase()}`}>
+                        {t.Type === "Income" ? "+" : "−"}₹
+                        {t.Amount.toLocaleString()}
+                      </span>
+                    </td>
+                    <td style={{ color: "var(--muted)", fontSize: "0.82rem" }}>
+                      {t.Notes || "—"}
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
           <div className="mobile-cards-list">
-            {recent.map(t => (
+            {recent.map((t) => (
               <div key={t.ID} className="tx-card">
                 <div className="tx-card-left">
                   <div className="tx-card-cat">{t.Category}</div>
-                  <div className="tx-card-meta"><span className={`badge ${t.Type.toLowerCase()}`}>{t.Type}</span><span className="tx-card-date">{t.Date}</span></div>
+                  <div className="tx-card-meta">
+                    <span className={`badge ${t.Type.toLowerCase()}`}>
+                      {t.Type}
+                    </span>
+                    <span className="tx-card-date">{t.Date}</span>
+                  </div>
                   {t.Notes && <div className="tx-card-notes">{t.Notes}</div>}
                 </div>
                 <div className="tx-card-right">
-                  <span className={`tx-card-amount amount ${t.Type.toLowerCase()}`}>{t.Type === "Income" ? "+" : "−"}₹{t.Amount.toLocaleString()}</span>
+                  <span
+                    className={`tx-card-amount amount ${t.Type.toLowerCase()}`}
+                  >
+                    {t.Type === "Income" ? "+" : "−"}₹
+                    {t.Amount.toLocaleString()}
+                  </span>
                 </div>
               </div>
             ))}
@@ -769,7 +1108,13 @@ function DashboardPage({ summary, transactions }) {
       )}
 
       {transactions.length === 0 && (
-        <div className="empty"><div className="empty-icon"><Wallet size={48} strokeWidth={1.2} /></div><div className="empty-title">No transactions yet</div><div>Add your first income or expense to get started</div></div>
+        <div className="empty">
+          <div className="empty-icon">
+            <Wallet size={48} strokeWidth={1.2} />
+          </div>
+          <div className="empty-title">No transactions yet</div>
+          <div>Add your first income or expense to get started</div>
+        </div>
       )}
     </div>
   );
@@ -777,7 +1122,13 @@ function DashboardPage({ summary, transactions }) {
 
 // ─── Add / Edit ───────────────────────────────────────────────────────────────
 function AddPage({ onAdd, onUpdate, editTx }) {
-  const getEmpty = () => ({ Date: dayjs().format("YYYY-MM-DD"), Type: "Expense", Category: "", Amount: "", Notes: "" });
+  const getEmpty = () => ({
+    Date: dayjs().format("YYYY-MM-DD"),
+    Type: "Expense",
+    Category: "",
+    Amount: "",
+    Notes: "",
+  });
   const [form, setForm] = useState(editTx || getEmpty());
   const [errors, setErrors] = useState({});
 
@@ -786,13 +1137,17 @@ function AddPage({ onAdd, onUpdate, editTx }) {
     setErrors({});
   }, [editTx]);
 
-  const set = (k, v) => { setForm(f => ({ ...f, [k]: v })); setErrors(e => ({ ...e, [k]: "" })); };
+  const set = (k, v) => {
+    setForm((f) => ({ ...f, [k]: v }));
+    setErrors((e) => ({ ...e, [k]: "" }));
+  };
 
   const validate = () => {
     const e = {};
     if (!form.Date) e.Date = "Date required";
     if (!form.Category.trim()) e.Category = "Category required";
-    if (!form.Amount || isNaN(Number(form.Amount)) || Number(form.Amount) <= 0) e.Amount = "Enter a positive amount";
+    if (!form.Amount || isNaN(Number(form.Amount)) || Number(form.Amount) <= 0)
+      e.Amount = "Enter a positive amount";
     setErrors(e);
     return Object.keys(e).length === 0;
   };
@@ -804,7 +1159,11 @@ function AddPage({ onAdd, onUpdate, editTx }) {
     if (editTx) {
       onUpdate({ ...tx, ID: editTx.ID, CreatedAt: editTx.CreatedAt });
     } else {
-      onAdd({ ...tx, ID: String(Date.now()), CreatedAt: new Date().toISOString() });
+      onAdd({
+        ...tx,
+        ID: String(Date.now()),
+        CreatedAt: new Date().toISOString(),
+      });
       setForm(getEmpty());
     }
   };
@@ -812,43 +1171,99 @@ function AddPage({ onAdd, onUpdate, editTx }) {
   return (
     <div>
       <div className="page-header">
-        <div className="page-title">{editTx ? "Edit Transaction" : "Add Transaction"}</div>
-        <div className="page-sub">{editTx ? `Editing ID: ${editTx.ID}` : "Record a new income or expense"}</div>
+        <div className="page-title">
+          {editTx ? "Edit Transaction" : "Add Transaction"}
+        </div>
+        <div className="page-sub">
+          {editTx
+            ? `Editing ID: ${editTx.ID}`
+            : "Record a new income or expense"}
+        </div>
       </div>
       <div className="form-card">
         <div className="form-grid">
           <div className="form-group">
             <label>Date</label>
-            <input type="date" value={form.Date} onChange={e => set("Date", e.target.value)} />
-            {errors.Date && <span style={{ color: "var(--expense)", fontSize: "0.75rem" }}>{errors.Date}</span>}
+            <input
+              type="date"
+              value={form.Date}
+              onChange={(e) => set("Date", e.target.value)}
+            />
+            {errors.Date && (
+              <span style={{ color: "var(--expense)", fontSize: "0.75rem" }}>
+                {errors.Date}
+              </span>
+            )}
           </div>
           <div className="form-group">
             <label>Type</label>
-            <select value={form.Type} onChange={e => set("Type", e.target.value)}>
+            <select
+              value={form.Type}
+              onChange={(e) => set("Type", e.target.value)}
+            >
               <option value="Income">Income</option>
               <option value="Expense">Expense</option>
             </select>
           </div>
           <div className="form-group">
             <label>Category</label>
-            <input type="text" placeholder="e.g. Food, Salary, Rent…" value={form.Category} onChange={e => set("Category", e.target.value)} />
-            {errors.Category && <span style={{ color: "var(--expense)", fontSize: "0.75rem" }}>{errors.Category}</span>}
+            <input
+              type="text"
+              placeholder="e.g. Food, Salary, Rent…"
+              value={form.Category}
+              onChange={(e) => set("Category", e.target.value)}
+            />
+            {errors.Category && (
+              <span style={{ color: "var(--expense)", fontSize: "0.75rem" }}>
+                {errors.Category}
+              </span>
+            )}
           </div>
           <div className="form-group">
             <label>Amount (₹)</label>
-            <input type="number" min="0.01" step="0.01" placeholder="0.00" value={form.Amount} onChange={e => set("Amount", e.target.value)} />
-            {errors.Amount && <span style={{ color: "var(--expense)", fontSize: "0.75rem" }}>{errors.Amount}</span>}
+            <input
+              type="number"
+              min="0.01"
+              step="0.01"
+              placeholder="0.00"
+              value={form.Amount}
+              onChange={(e) => set("Amount", e.target.value)}
+            />
+            {errors.Amount && (
+              <span style={{ color: "var(--expense)", fontSize: "0.75rem" }}>
+                {errors.Amount}
+              </span>
+            )}
           </div>
           <div className="form-group full">
             <label>Notes (optional)</label>
-            <textarea placeholder="Any additional details…" value={form.Notes} onChange={e => set("Notes", e.target.value)} />
+            <textarea
+              placeholder="Any additional details…"
+              value={form.Notes}
+              onChange={(e) => set("Notes", e.target.value)}
+            />
           </div>
         </div>
         <div style={{ display: "flex", gap: 12, marginTop: 22 }}>
           <button className="btn btn-primary" onClick={handleSubmit}>
-            {editTx ? <><CheckCheck size={16} /> Save Changes</> : <><PlusCircle size={16} /> Add Transaction</>}
+            {editTx ? (
+              <>
+                <CheckCheck size={16} /> Save Changes
+              </>
+            ) : (
+              <>
+                <PlusCircle size={16} /> Add Transaction
+              </>
+            )}
           </button>
-          {editTx && <button className="btn btn-secondary" onClick={() => onUpdate(null)}>Cancel</button>}
+          {editTx && (
+            <button
+              className="btn btn-secondary"
+              onClick={() => onUpdate(null)}
+            >
+              Cancel
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -860,12 +1275,18 @@ function ListPage({ transactions, onEdit, onDelete }) {
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("All");
 
-  const filtered = useMemo(() =>
-    [...transactions]
-      .filter(t => typeFilter === "All" || t.Type === typeFilter)
-      .filter(t => !search || t.Category.toLowerCase().includes(search.toLowerCase()) || (t.Notes || "").toLowerCase().includes(search.toLowerCase()))
-      .sort((a, b) => dayjs(b.Date).valueOf() - dayjs(a.Date).valueOf()),
-    [transactions, search, typeFilter]
+  const filtered = useMemo(
+    () =>
+      [...transactions]
+        .filter((t) => typeFilter === "All" || t.Type === typeFilter)
+        .filter(
+          (t) =>
+            !search ||
+            t.Category.toLowerCase().includes(search.toLowerCase()) ||
+            (t.Notes || "").toLowerCase().includes(search.toLowerCase()),
+        )
+        .sort((a, b) => dayjs(b.Date).valueOf() - dayjs(a.Date).valueOf()),
+    [transactions, search, typeFilter],
   );
 
   return (
@@ -876,17 +1297,31 @@ function ListPage({ transactions, onEdit, onDelete }) {
       </div>
 
       <div className="filter-bar">
-        <input className="search-input" type="text" placeholder="Search category or notes…" value={search} onChange={e => setSearch(e.target.value)} />
+        <input
+          className="search-input"
+          type="text"
+          placeholder="Search category or notes…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
         <div className="filter-buttons">
-          {["All", "Income", "Expense"].map(t => (
-            <button key={t} className={`filter-btn ${typeFilter === t ? "active" : ""}`} onClick={() => setTypeFilter(t)}>{t}</button>
+          {["All", "Income", "Expense"].map((t) => (
+            <button
+              key={t}
+              className={`filter-btn ${typeFilter === t ? "active" : ""}`}
+              onClick={() => setTypeFilter(t)}
+            >
+              {t}
+            </button>
           ))}
         </div>
       </div>
 
       {filtered.length === 0 ? (
         <div className="empty">
-          <div className="empty-icon"><List size={48} strokeWidth={1.2} /></div>
+          <div className="empty-icon">
+            <List size={48} strokeWidth={1.2} />
+          </div>
           <div className="empty-title">No transactions found</div>
           <div>Try adjusting filters or add a new transaction</div>
         </div>
@@ -894,23 +1329,74 @@ function ListPage({ transactions, onEdit, onDelete }) {
         <div className="table-wrap">
           <div className="table-header">
             <div className="table-title">All Transactions</div>
-            <span style={{ color: "var(--muted)", fontSize: "0.8rem", fontFamily: "DM Mono, monospace" }}>{filtered.length} shown</span>
+            <span
+              style={{
+                color: "var(--muted)",
+                fontSize: "0.8rem",
+                fontFamily: "DM Mono, monospace",
+              }}
+            >
+              {filtered.length} shown
+            </span>
           </div>
           <div className="desktop-table">
             <table>
-              <thead><tr><th>Date</th><th>Type</th><th>Category</th><th>Amount</th><th>Notes</th><th>Actions</th></tr></thead>
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Type</th>
+                  <th>Category</th>
+                  <th>Amount</th>
+                  <th>Notes</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
               <tbody>
-                {filtered.map(t => (
+                {filtered.map((t) => (
                   <tr key={t.ID}>
-                    <td style={{ fontFamily: "DM Mono, monospace", fontSize: "0.82rem" }}>{t.Date}</td>
-                    <td><span className={`badge ${t.Type.toLowerCase()}`}>{t.Type}</span></td>
+                    <td
+                      style={{
+                        fontFamily: "DM Mono, monospace",
+                        fontSize: "0.82rem",
+                      }}
+                    >
+                      {t.Date}
+                    </td>
+                    <td>
+                      <span className={`badge ${t.Type.toLowerCase()}`}>
+                        {t.Type}
+                      </span>
+                    </td>
                     <td>{t.Category}</td>
-                    <td><span className={`amount ${t.Type.toLowerCase()}`}>{t.Type === "Income" ? "+" : "−"}₹{t.Amount.toLocaleString()}</span></td>
-                    <td style={{ color: "var(--muted)", fontSize: "0.82rem", maxWidth: 200 }}>{t.Notes || "—"}</td>
+                    <td>
+                      <span className={`amount ${t.Type.toLowerCase()}`}>
+                        {t.Type === "Income" ? "+" : "−"}₹
+                        {t.Amount.toLocaleString()}
+                      </span>
+                    </td>
+                    <td
+                      style={{
+                        color: "var(--muted)",
+                        fontSize: "0.82rem",
+                        maxWidth: 200,
+                      }}
+                    >
+                      {t.Notes || "—"}
+                    </td>
                     <td>
                       <div className="actions">
-                        <button className="btn-icon" onClick={() => onEdit(t)}><Pencil size={14} /></button>
-                        <button className="btn-icon del" onClick={() => { if (confirm("Delete this transaction?")) onDelete(t.ID); }}><Trash2 size={14} /></button>
+                        <button className="btn-icon" onClick={() => onEdit(t)}>
+                          <Pencil size={14} />
+                        </button>
+                        <button
+                          className="btn-icon del"
+                          onClick={() => {
+                            if (confirm("Delete this transaction?"))
+                              onDelete(t.ID);
+                          }}
+                        >
+                          <Trash2 size={14} />
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -919,21 +1405,37 @@ function ListPage({ transactions, onEdit, onDelete }) {
             </table>
           </div>
           <div className="mobile-cards-list">
-            {filtered.map(t => (
+            {filtered.map((t) => (
               <div key={t.ID} className="tx-card">
                 <div className="tx-card-left">
                   <div className="tx-card-cat">{t.Category}</div>
                   <div className="tx-card-meta">
-                    <span className={`badge ${t.Type.toLowerCase()}`}>{t.Type}</span>
+                    <span className={`badge ${t.Type.toLowerCase()}`}>
+                      {t.Type}
+                    </span>
                     <span className="tx-card-date">{t.Date}</span>
                   </div>
                   {t.Notes && <div className="tx-card-notes">{t.Notes}</div>}
                 </div>
                 <div className="tx-card-right">
-                  <span className={`tx-card-amount amount ${t.Type.toLowerCase()}`}>{t.Type === "Income" ? "+" : "−"}₹{t.Amount.toLocaleString()}</span>
+                  <span
+                    className={`tx-card-amount amount ${t.Type.toLowerCase()}`}
+                  >
+                    {t.Type === "Income" ? "+" : "−"}₹
+                    {t.Amount.toLocaleString()}
+                  </span>
                   <div className="actions">
-                    <button className="btn-icon" onClick={() => onEdit(t)}><Pencil size={14} /></button>
-                    <button className="btn-icon del" onClick={() => { if (confirm("Delete?")) onDelete(t.ID); }}><Trash2 size={14} /></button>
+                    <button className="btn-icon" onClick={() => onEdit(t)}>
+                      <Pencil size={14} />
+                    </button>
+                    <button
+                      className="btn-icon del"
+                      onClick={() => {
+                        if (confirm("Delete?")) onDelete(t.ID);
+                      }}
+                    >
+                      <Trash2 size={14} />
+                    </button>
                   </div>
                 </div>
               </div>
@@ -948,65 +1450,186 @@ function ListPage({ transactions, onEdit, onDelete }) {
 // ─── Reports ──────────────────────────────────────────────────────────────────
 function ReportsPage({ transactions, toast }) {
   const [period, setPeriod] = useState("yearly");
-  const [fromDate, setFromDate] = useState(dayjs().startOf("month").format("YYYY-MM-DD"));
+  const [fromDate, setFromDate] = useState(
+    dayjs().startOf("month").format("YYYY-MM-DD"),
+  );
   const [toDate, setToDate] = useState(dayjs().format("YYYY-MM-DD"));
 
-  const filtered = useMemo(() => dateUtils.filterByPeriod(transactions, period, fromDate, toDate), [transactions, period, fromDate, toDate]);
-  const income = filtered.filter(t => t.Type === "Income").reduce((s, t) => s + t.Amount, 0);
-  const expense = filtered.filter(t => t.Type === "Expense").reduce((s, t) => s + t.Amount, 0);
+  const filtered = useMemo(
+    () => dateUtils.filterByPeriod(transactions, period, fromDate, toDate),
+    [transactions, period, fromDate, toDate],
+  );
+  const income = filtered
+    .filter((t) => t.Type === "Income")
+    .reduce((s, t) => s + t.Amount, 0);
+  const expense = filtered
+    .filter((t) => t.Type === "Expense")
+    .reduce((s, t) => s + t.Amount, 0);
   const net = income - expense;
-  const fmt = n => new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(n);
+  const fmt = (n) =>
+    new Intl.NumberFormat("en-IN", {
+      style: "currency",
+      currency: "INR",
+      maximumFractionDigits: 0,
+    }).format(n);
 
   const catData = useMemo(() => {
     const map = {};
-    filtered.filter(t => t.Type === "Expense").forEach(t => { map[t.Category] = (map[t.Category] || 0) + t.Amount; });
-    return Object.entries(map).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value).slice(0, 8);
+    filtered
+      .filter((t) => t.Type === "Expense")
+      .forEach((t) => {
+        map[t.Category] = (map[t.Category] || 0) + t.Amount;
+      });
+    return Object.entries(map)
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 8);
   }, [filtered]);
 
-  const handleDownload = () => {
-    const start = period === "custom" ? fromDate : dayjs().startOf(period === "daily" ? "day" : period === "weekly" ? "week" : period === "monthly" ? "month" : "year").format("YYYY-MM-DD");
+  const handleDownload = async () => {
+    const start =
+      period === "custom"
+        ? fromDate
+        : dayjs()
+            .startOf(
+              period === "daily"
+                ? "day"
+                : period === "weekly"
+                  ? "week"
+                  : period === "monthly"
+                    ? "month"
+                    : "year",
+            )
+            .format("YYYY-MM-DD");
+
     const end = period === "custom" ? toDate : dayjs().format("YYYY-MM-DD");
+
     const wb = excelService.generateReport(filtered);
     const buf = excelService.toBuffer(wb);
-    saveAs(new Blob([buf]), `report_${start}_${end}.xlsx`);
-    toast("Report downloaded!", "success");
+
+    const fileName = `report_${start}_${end}.xlsx`;
+
+    // 🌐 WEB
+    if (Capacitor.getPlatform() === "web") {
+      saveAs(new Blob([buf]), fileName);
+      toast("Report downloaded!", "success");
+      return;
+    }
+
+    // 📱 ANDROID
+    const base64 = btoa(
+      new Uint8Array(buf).reduce(
+        (data, byte) => data + String.fromCharCode(byte),
+        "",
+      ),
+    );
+
+    await Filesystem.writeFile({
+      path: fileName,
+      data: base64,
+      directory: Directory.Documents,
+    });
+
+    toast("Report saved to Documents!", "success");
   };
 
   const periods = [
-    { id: "daily", label: "Today" }, { id: "weekly", label: "This Week" },
-    { id: "monthly", label: "This Month" }, { id: "yearly", label: "This Year" },
+    { id: "daily", label: "Today" },
+    { id: "weekly", label: "This Week" },
+    { id: "monthly", label: "This Month" },
+    { id: "yearly", label: "This Year" },
     { id: "custom", label: "Custom" },
   ];
 
   return (
     <div>
-      <div className="page-header" style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: 16 }}>
-        <div><div className="page-title">Reports</div><div className="page-sub">Analyze your spending patterns</div></div>
-        <button className="btn btn-success" onClick={handleDownload}><Download size={16} /> Download Excel Report</button>
+      <div
+        className="page-header"
+        style={{
+          display: "flex",
+          alignItems: "flex-start",
+          justifyContent: "space-between",
+          flexWrap: "wrap",
+          gap: 16,
+        }}
+      >
+        <div>
+          <div className="page-title">Reports</div>
+          <div className="page-sub">Analyze your spending patterns</div>
+        </div>
+        <button className="btn btn-success" onClick={handleDownload}>
+          <Download size={16} /> Download Excel Report
+        </button>
       </div>
 
       <div className="filter-row">
-        {periods.map(p => (
-          <button key={p.id} className={`filter-btn ${period === p.id ? "active" : ""}`} onClick={() => setPeriod(p.id)}>{p.label}</button>
+        {periods.map((p) => (
+          <button
+            key={p.id}
+            className={`filter-btn ${period === p.id ? "active" : ""}`}
+            onClick={() => setPeriod(p.id)}
+          >
+            {p.label}
+          </button>
         ))}
         {period === "custom" && (
           <>
-            <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} style={{ maxWidth: 160 }} />
+            <input
+              type="date"
+              value={fromDate}
+              onChange={(e) => setFromDate(e.target.value)}
+              style={{ maxWidth: 160 }}
+            />
             <span style={{ color: "var(--muted)" }}>→</span>
-            <input type="date" value={toDate} onChange={e => setToDate(e.target.value)} style={{ maxWidth: 160 }} />
+            <input
+              type="date"
+              value={toDate}
+              onChange={(e) => setToDate(e.target.value)}
+              style={{ maxWidth: 160 }}
+            />
           </>
         )}
       </div>
 
       <div className="cards">
-        <div className="card"><div className="card-label">INCOME</div><div className="card-value income">{fmt(income)}</div><div className="card-sub">{filtered.filter(t => t.Type === "Income").length} entries</div></div>
-        <div className="card"><div className="card-label">EXPENSE</div><div className="card-value expense">{fmt(expense)}</div><div className="card-sub">{filtered.filter(t => t.Type === "Expense").length} entries</div></div>
-        <div className="card"><div className="card-label">NET BALANCE</div><div className={`card-value net ${net >= 0 ? "pos" : "neg"}`}>{fmt(net)}</div><div className="card-sub">{net >= 0 ? "Surplus" : "Deficit"}</div></div>
-        <div className="card"><div className="card-label">TRANSACTIONS</div><div className="card-value" style={{ color: "var(--accent)" }}>{filtered.length}</div><div className="card-sub">In this period</div></div>
+        <div className="card">
+          <div className="card-label">INCOME</div>
+          <div className="card-value income">{fmt(income)}</div>
+          <div className="card-sub">
+            {filtered.filter((t) => t.Type === "Income").length} entries
+          </div>
+        </div>
+        <div className="card">
+          <div className="card-label">EXPENSE</div>
+          <div className="card-value expense">{fmt(expense)}</div>
+          <div className="card-sub">
+            {filtered.filter((t) => t.Type === "Expense").length} entries
+          </div>
+        </div>
+        <div className="card">
+          <div className="card-label">NET BALANCE</div>
+          <div className={`card-value net ${net >= 0 ? "pos" : "neg"}`}>
+            {fmt(net)}
+          </div>
+          <div className="card-sub">{net >= 0 ? "Surplus" : "Deficit"}</div>
+        </div>
+        <div className="card">
+          <div className="card-label">TRANSACTIONS</div>
+          <div className="card-value" style={{ color: "var(--accent)" }}>
+            {filtered.length}
+          </div>
+          <div className="card-sub">In this period</div>
+        </div>
       </div>
 
       {filtered.length === 0 ? (
-        <div className="empty"><div className="empty-icon"><BarChart2 size={48} strokeWidth={1.2} /></div><div className="empty-title">No data for this period</div><div>Try a different time range</div></div>
+        <div className="empty">
+          <div className="empty-icon">
+            <BarChart2 size={48} strokeWidth={1.2} />
+          </div>
+          <div className="empty-title">No data for this period</div>
+          <div>Try a different time range</div>
+        </div>
       ) : (
         <>
           <div className="charts-grid">
@@ -1014,23 +1637,73 @@ function ReportsPage({ transactions, toast }) {
               <div className="chart-title">Income vs Expense</div>
               <ResponsiveContainer width="100%" height={240}>
                 <PieChart>
-                  <Pie data={[{ name: "Income", value: income }, { name: "Expense", value: expense }]} cx="50%" cy="50%" innerRadius={60} outerRadius={90} paddingAngle={5} dataKey="value">
-                    <Cell fill="#4df7c8" /><Cell fill="#f74d8a" />
+                  <Pie
+                    data={[
+                      { name: "Income", value: income },
+                      { name: "Expense", value: expense },
+                    ]}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={60}
+                    outerRadius={90}
+                    paddingAngle={5}
+                    dataKey="value"
+                  >
+                    <Cell fill="#4df7c8" />
+                    <Cell fill="#f74d8a" />
                   </Pie>
-                  <Tooltip formatter={v => fmt(v)} contentStyle={{ background: "#7c6af7", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, color: "#f0eeff" }} />
-                  <Legend formatter={v => <span style={{ color: "#f0eeff", fontSize: "0.8rem" }}>{v}</span>} />
+                  <Tooltip
+                    formatter={(v) => fmt(v)}
+                    contentStyle={{
+                      background: "#7c6af7",
+                      border: "1px solid rgba(255,255,255,0.08)",
+                      borderRadius: 10,
+                      color: "#f0eeff",
+                    }}
+                  />
+                  <Legend
+                    formatter={(v) => (
+                      <span style={{ color: "#f0eeff", fontSize: "0.8rem" }}>
+                        {v}
+                      </span>
+                    )}
+                  />
                 </PieChart>
               </ResponsiveContainer>
             </div>
             <div className="chart-card">
               <div className="chart-title">Expense by Category</div>
-              {catData.length === 0 ? <div className="loading">No expense data</div> : (
+              {catData.length === 0 ? (
+                <div className="loading">No expense data</div>
+              ) : (
                 <ResponsiveContainer width="100%" height={240}>
-                  <BarChart data={catData} margin={{ top: 0, right: 0, left: 0, bottom: 40 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-                    <XAxis dataKey="name" tick={{ fill: "rgba(240,238,255,0.45)", fontSize: 10 }} angle={-30} textAnchor="end" interval={0} />
-                    <YAxis tick={{ fill: "rgba(240,238,255,0.45)", fontSize: 11 }} />
-                    <Tooltip formatter={v => fmt(v)} contentStyle={{ background: "#1a1a26", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, color: "#f0eeff" }} />
+                  <BarChart
+                    data={catData}
+                    margin={{ top: 0, right: 0, left: 0, bottom: 40 }}
+                  >
+                    <CartesianGrid
+                      strokeDasharray="3 3"
+                      stroke="rgba(255,255,255,0.05)"
+                    />
+                    <XAxis
+                      dataKey="name"
+                      tick={{ fill: "rgba(240,238,255,0.45)", fontSize: 10 }}
+                      angle={-30}
+                      textAnchor="end"
+                      interval={0}
+                    />
+                    <YAxis
+                      tick={{ fill: "rgba(240,238,255,0.45)", fontSize: 11 }}
+                    />
+                    <Tooltip
+                      formatter={(v) => fmt(v)}
+                      contentStyle={{
+                        background: "#1a1a26",
+                        border: "1px solid rgba(255,255,255,0.08)",
+                        borderRadius: 10,
+                        color: "#f0eeff",
+                      }}
+                    />
                     <Bar dataKey="value" fill="#f74d8a" radius={[6, 6, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
@@ -1038,33 +1711,73 @@ function ReportsPage({ transactions, toast }) {
             </div>
           </div>
           <div className="table-wrap" style={{ marginTop: 24 }}>
-            <div className="table-header"><div className="table-title">Transactions in Period</div></div>
+            <div className="table-header">
+              <div className="table-title">Transactions in Period</div>
+            </div>
             <div className="desktop-table">
               <table>
-                <thead><tr><th>Date</th><th>Type</th><th>Category</th><th>Amount</th><th>Notes</th></tr></thead>
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Type</th>
+                    <th>Category</th>
+                    <th>Amount</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
                 <tbody>
-                  {filtered.map(t => (
+                  {filtered.map((t) => (
                     <tr key={t.ID}>
-                      <td style={{ fontFamily: "DM Mono, monospace", fontSize: "0.82rem" }}>{t.Date}</td>
-                      <td><span className={`badge ${t.Type.toLowerCase()}`}>{t.Type}</span></td>
+                      <td
+                        style={{
+                          fontFamily: "DM Mono, monospace",
+                          fontSize: "0.82rem",
+                        }}
+                      >
+                        {t.Date}
+                      </td>
+                      <td>
+                        <span className={`badge ${t.Type.toLowerCase()}`}>
+                          {t.Type}
+                        </span>
+                      </td>
                       <td>{t.Category}</td>
-                      <td><span className={`amount ${t.Type.toLowerCase()}`}>{t.Type === "Income" ? "+" : "−"}₹{t.Amount.toLocaleString()}</span></td>
-                      <td style={{ color: "var(--muted)", fontSize: "0.82rem" }}>{t.Notes || "—"}</td>
+                      <td>
+                        <span className={`amount ${t.Type.toLowerCase()}`}>
+                          {t.Type === "Income" ? "+" : "−"}₹
+                          {t.Amount.toLocaleString()}
+                        </span>
+                      </td>
+                      <td
+                        style={{ color: "var(--muted)", fontSize: "0.82rem" }}
+                      >
+                        {t.Notes || "—"}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
             <div className="mobile-cards-list">
-              {filtered.map(t => (
+              {filtered.map((t) => (
                 <div key={t.ID} className="tx-card">
                   <div className="tx-card-left">
                     <div className="tx-card-cat">{t.Category}</div>
-                    <div className="tx-card-meta"><span className={`badge ${t.Type.toLowerCase()}`}>{t.Type}</span><span className="tx-card-date">{t.Date}</span></div>
+                    <div className="tx-card-meta">
+                      <span className={`badge ${t.Type.toLowerCase()}`}>
+                        {t.Type}
+                      </span>
+                      <span className="tx-card-date">{t.Date}</span>
+                    </div>
                     {t.Notes && <div className="tx-card-notes">{t.Notes}</div>}
                   </div>
                   <div className="tx-card-right">
-                    <span className={`tx-card-amount amount ${t.Type.toLowerCase()}`}>{t.Type === "Income" ? "+" : "−"}₹{t.Amount.toLocaleString()}</span>
+                    <span
+                      className={`tx-card-amount amount ${t.Type.toLowerCase()}`}
+                    >
+                      {t.Type === "Income" ? "+" : "−"}₹
+                      {t.Amount.toLocaleString()}
+                    </span>
                   </div>
                 </div>
               ))}
