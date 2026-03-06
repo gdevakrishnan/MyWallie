@@ -702,7 +702,7 @@ export default function App() {
 
   const navItems = [
     { id: "dashboard", icon: LayoutDashboard, label: "Dashboard" },
-    { id: "add", icon: PlusCircle, label: "Add Transaction" },
+    { id: "add", icon: PlusCircle, label: "New Transaction" },
     { id: "list", icon: List, label: "Transactions" },
     { id: "reports", icon: BarChart2, label: "Reports" },
   ];
@@ -1154,7 +1154,6 @@ function AddPage({ onAdd, onUpdate, editTx }) {
 
   const handleSubmit = () => {
     if (!validate()) return;
-    console.log(form);
     const tx = { ...form, Amount: Number(form.Amount) };
     if (editTx) {
       onUpdate({ ...tx, ID: editTx.ID, CreatedAt: editTx.CreatedAt });
@@ -1172,7 +1171,7 @@ function AddPage({ onAdd, onUpdate, editTx }) {
     <div>
       <div className="page-header">
         <div className="page-title">
-          {editTx ? "Edit Transaction" : "Add Transaction"}
+          {editTx ? "Edit Transaction" : "New Transaction"}
         </div>
         <div className="page-sub">
           {editTx
