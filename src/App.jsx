@@ -6,6 +6,7 @@ import isBetween from "dayjs/plugin/isBetween";
 import isSameOrBefore from "dayjs/plugin/isSameOrBefore";
 import isSameOrAfter from "dayjs/plugin/isSameOrAfter";
 import weekOfYear from "dayjs/plugin/weekOfYear";
+import { Capacitor } from "@capacitor/core";
 import { Filesystem, Directory } from "@capacitor/filesystem";
 import {
   PieChart,
@@ -32,16 +33,11 @@ import {
   Info,
   Pencil,
   Trash2,
-  Upload,
   Sparkles,
   FileSpreadsheet,
-  TrendingUp,
-  TrendingDown,
   Wallet,
-  Activity,
   CheckCheck,
   AlertTriangle,
-  RefreshCw,
   Download,
 } from "lucide-react";
 
@@ -50,10 +46,46 @@ dayjs.extend(isSameOrBefore);
 dayjs.extend(isSameOrAfter);
 dayjs.extend(weekOfYear);
 
-// ─── IndexedDB handle store ───────────────────────────────────────────────────
-// FileSystemFileHandle objects cannot be serialized to JSON/localStorage.
-// IndexedDB is the only place they can be persisted across page loads.
-// We store the handle under a fixed key so we can restore it on reload.
+// ─── Platform detection ───────────────────────────────────────────────────────
+const IS_NATIVE = Capacitor.isNativePlatform(); // true on Android / iOS
+const MOBILE_FILE = "mywallie_data.xlsx"; // fixed path inside Directory.Data
+
+// ─── Mobile storage helpers (Capacitor Filesystem — no permissions needed) ────
+const mobileStorage = {
+  async load() {
+    try {
+      const result = await Filesystem.readFile({
+        path: MOBILE_FILE,
+        directory: Directory.Data,
+      });
+      // result.data is base64
+      const binary = atob(result.data);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      return excelService.parse(bytes.buffer);
+    } catch {
+      // File doesn't exist yet (first run) — return empty
+      return [];
+    }
+  },
+
+  async save(transactions) {
+    const buf = excelService.toBuffer(
+      excelService.createWorkbook(transactions),
+    );
+    const base64 = btoa(
+      new Uint8Array(buf).reduce((d, b) => d + String.fromCharCode(b), ""),
+    );
+    await Filesystem.writeFile({
+      path: MOBILE_FILE,
+      data: base64,
+      directory: Directory.Data, // private app sandbox — no permissions needed
+      recursive: true,
+    });
+  },
+};
+
+// ─── IndexedDB handle store (web only) ───────────────────────────────────────
 const IDB_DB = "mywallie_db";
 const IDB_STORE = "handles";
 const IDB_KEY = "active_file_handle";
@@ -109,7 +141,7 @@ async function idbDel() {
   }
 }
 
-// ─── localStorage helpers (for filename display only) ─────────────────────────
+// ─── localStorage helpers (web — filename display only) ──────────────────────
 const LS_KEY = "mywallie_file_name";
 const lsSet = (v) => {
   try {
@@ -279,37 +311,32 @@ const S = `
   body { background: var(--bg); color: var(--text); font-family: 'Syne', sans-serif; min-height: 100vh; }
   .app { display: flex; min-height: 100vh; }
 
-  /* Sidebar */
   .sidebar { width: 240px; min-height: 100vh; background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; padding: 28px 16px; position: sticky; top: 0; height: 100vh; overflow: hidden; flex-shrink: 0; }
   .logo { font-size: 1.3rem; font-weight: 800; letter-spacing: -0.03em; margin-bottom: 8px; }
   .logo span { color: var(--accent); }
   .logo-sub { font-size: 0.7rem; color: var(--muted); font-family: 'DM Mono', monospace; margin-bottom: 36px; letter-spacing: 0.1em; }
   .nav { display: flex; flex-direction: column; gap: 4px; flex: 1; }
-  .nav-item { display: flex; align-items: center; gap: 12px; padding: 11px 14px; border-radius: var(--radius-sm); cursor: pointer; transition: all 0.18s; color: var(--muted); font-weight: 500; font-size: 0.88rem; border: none; background: none; text-align: left; width: 100%; }
+  .nav-item { display: flex; align-items: center; gap: 12px; padding: 11px 14px; border-radius: var(--radius-sm); transition: all 0.18s; color: var(--muted); font-weight: 500; font-size: 0.88rem; border: none; background: none; text-align: left; width: 100%; }
   .nav-item:hover { background: var(--surface2); color: var(--text); }
   .nav-item.active { background: var(--accent); color: #fff; }
   .nav-icon { width: 20px; text-align: center; flex-shrink: 0; display:flex; align-items:center; justify-content:center; }
 
-  /* Bottom nav — mobile only */
   .bottom-nav { display: none; position: fixed; bottom: 0; left: 0; right: 0; z-index: 100; background: var(--surface); border-top: 1px solid var(--border); padding: 6px 0 max(8px, env(safe-area-inset-bottom)); justify-content: space-around; align-items: stretch; }
-  .bottom-nav-item { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 6px 8px; border: none; background: none; cursor: pointer; color: var(--muted); font-family: 'Syne', sans-serif; font-size: 0.6rem; font-weight: 600; transition: color 0.15s; flex: 1; min-width: 0; }
+  .bottom-nav-item { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 6px 8px; border: none; background: none; color: var(--muted); font-family: 'Syne', sans-serif; font-size: 0.6rem; font-weight: 600; transition: color 0.15s; flex: 1; min-width: 0; }
   .bottom-nav-item svg { margin-bottom: 1px; }
   .bottom-nav-item.active { color: var(--accent); }
 
-  /* File zone */
   .file-zone { margin-top: 24px; border-top: 1px solid var(--border); padding-top: 16px; }
   .file-zone-label { font-size: 0.7rem; color: var(--muted); font-family: 'DM Mono', monospace; letter-spacing: 0.1em; margin-bottom: 10px; }
-  .file-btn { width: 100%; padding: 9px 12px; border-radius: var(--radius-sm); background: var(--surface2); border: 1px dashed var(--border); color: var(--muted); font-size: 0.8rem; font-family: 'Syne', sans-serif; cursor: pointer; transition: all 0.18s; display: flex; align-items: center; gap: 8px; }
+  .file-btn { width: 100%; padding: 9px 12px; border-radius: var(--radius-sm); background: var(--surface2); border: 1px dashed var(--border); color: var(--muted); font-size: 0.8rem; font-family: 'Syne', sans-serif; transition: all 0.18s; display: flex; align-items: center; gap: 8px; }
   .file-btn:hover { border-color: var(--accent); color: var(--accent); }
   .file-status { font-size: 0.72rem; color: var(--income); margin-top: 8px; font-family: 'DM Mono', monospace; line-height: 1.6; }
 
-  /* Main */
   .main { flex: 1; padding: 36px 40px; overflow-x: hidden; min-width: 0; }
   .page-header { margin-bottom: 32px; }
   .page-title { font-size: 1.9rem; font-weight: 800; letter-spacing: -0.04em; }
   .page-sub { color: var(--muted); font-size: 0.85rem; margin-top: 4px; }
 
-  /* Cards */
   .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin-bottom: 32px; }
   .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 22px; transition: transform 0.18s; }
   .card:hover { transform: translateY(-2px); }
@@ -321,7 +348,6 @@ const S = `
   .card-value.net.neg { color: var(--expense); }
   .card-sub { font-size: 0.75rem; color: var(--muted); margin-top: 6px; }
 
-  /* Table */
   .table-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
   .table-header { display: flex; align-items: center; justify-content: space-between; padding: 18px 22px; border-bottom: 1px solid var(--border); }
   .table-title { font-weight: 700; font-size: 1rem; }
@@ -331,7 +357,6 @@ const S = `
   .desktop-table tr:last-child td { border-bottom: none; }
   .desktop-table tr:hover td { background: var(--surface2); }
 
-  /* Mobile transaction cards */
   .mobile-cards-list { display: none; }
   .tx-card { padding: 14px 18px; border-bottom: 1px solid var(--border); display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
   .tx-card:last-child { border-bottom: none; }
@@ -349,11 +374,10 @@ const S = `
   .amount.income { color: var(--income); font-weight: 700; font-family: 'DM Mono', monospace; }
   .amount.expense { color: var(--expense); font-weight: 700; font-family: 'DM Mono', monospace; }
   .actions { display: flex; gap: 8px; }
-  .btn-icon { background: var(--surface3); border: none; border-radius: 8px; padding: 7px 10px; cursor: pointer; font-size: 0.85rem; transition: all 0.15s; color: var(--muted); }
+  .btn-icon { background: var(--surface3); border: none; border-radius: 8px; padding: 7px 10px; font-size: 0.85rem; transition: all 0.15s; color: var(--muted); }
   .btn-icon:hover { background: var(--accent); color: #fff; }
   .btn-icon.del:hover { background: var(--expense); color: #fff; }
 
-  /* Form */
   .form-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 28px; max-width: 560px; }
   .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
   .form-group { display: flex; flex-direction: column; gap: 7px; }
@@ -364,7 +388,7 @@ const S = `
   select option { background: var(--surface2); }
   textarea { resize: vertical; min-height: 80px; }
 
-  .btn { display: inline-flex; align-items: center; gap: 8px; padding: 11px 22px; border-radius: var(--radius-sm); border: none; cursor: pointer; font-family: 'Syne', sans-serif; font-weight: 700; font-size: 0.88rem; transition: all 0.18s; }
+  .btn { display: inline-flex; align-items: center; gap: 8px; padding: 11px 22px; border-radius: var(--radius-sm); border: none; font-family: 'Syne', sans-serif; font-weight: 700; font-size: 0.88rem; transition: all 0.18s; }
   .btn-primary { background: var(--accent); color: #fff; }
   .btn-primary:hover { background: #6a58e5; transform: translateY(-1px); }
   .btn-secondary { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
@@ -372,7 +396,6 @@ const S = `
   .btn-success { background: var(--income); color: #000; }
   .btn-success:hover { filter: brightness(0.9); }
 
-  /* Toast */
   .toast-wrap { position: fixed; bottom: 28px; right: 28px; z-index: 999; display: flex; flex-direction: column; gap: 10px; }
   .toast { padding: 13px 18px; border-radius: var(--radius-sm); font-size: 0.85rem; font-weight: 600; animation: slideIn 0.25s ease; min-width: 240px; max-width: 320px; display: flex; align-items: center; gap: 10px; }
   .toast.success { background: var(--income); color: #000; }
@@ -380,12 +403,11 @@ const S = `
   .toast.info { background: var(--accent); color: #fff; }
   @keyframes slideIn { from { transform: translateX(60px); opacity: 0; } to { transform: none; opacity: 1; } }
 
-  /* Report filters */
   .filter-row { display: flex; align-items: center; gap: 10px; margin-bottom: 24px; flex-wrap: wrap; }
   .filter-bar { display: flex; gap: 12px; margin-bottom: 20px; align-items: center; flex-wrap: wrap; }
   .search-input { flex: 1; min-width: 180px; max-width: 260px; }
   .filter-buttons { display: flex; gap: 8px; flex-wrap: wrap; }
-  .filter-btn { padding: 8px 14px; border-radius: 100px; border: 1px solid var(--border); background: var(--surface2); color: var(--muted); font-family: 'Syne', sans-serif; font-size: 0.8rem; font-weight: 600; cursor: pointer; transition: all 0.15s; }
+  .filter-btn { padding: 8px 14px; border-radius: 100px; border: 1px solid var(--border); background: var(--surface2); color: var(--muted); font-family: 'Syne', sans-serif; font-size: 0.8rem; font-weight: 600; transition: all 0.15s; }
   .filter-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
   .filter-btn:hover:not(.active) { border-color: var(--accent); color: var(--accent); }
 
@@ -402,16 +424,14 @@ const S = `
   ::-webkit-scrollbar-track { background: var(--bg); }
   ::-webkit-scrollbar-thumb { background: var(--surface3); border-radius: 3px; }
 
-  /* Welcome screen */
+  /* Web-only file screens */
   .welcome-wrap { max-width: 480px; margin: 60px auto 0; text-align: center; }
   .welcome-icon { margin-bottom: 20px; color: var(--accent); }
   .welcome-title { font-size: 1.5rem; font-weight: 800; margin-bottom: 8px; }
   .welcome-sub { color: var(--muted); font-size: 0.88rem; margin-bottom: 32px; line-height: 1.6; }
   .welcome-actions { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
-  .file-input-label { display: inline-flex; align-items: center; gap: 8px; padding: 11px 22px; border-radius: var(--radius-sm); background: var(--accent); color: #fff; font-family: 'Syne', sans-serif; font-weight: 700; font-size: 0.88rem; cursor: pointer; transition: all 0.18s; border: none; }
+  .file-input-label { display: inline-flex; align-items: center; gap: 8px; padding: 11px 22px; border-radius: var(--radius-sm); background: var(--accent); color: #fff; font-family: 'Syne', sans-serif; font-weight: 700; font-size: 0.88rem; transition: all 0.18s; border: none; }
   .file-input-label:hover { background: #6a58e5; transform: translateY(-1px); }
-
-  /* Reconnect banner */
   .reconnect-wrap { max-width: 480px; margin: 60px auto 0; }
   .reconnect-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 32px; text-align: center; }
   .reconnect-icon { margin-bottom: 16px; color: var(--accent); }
@@ -420,7 +440,9 @@ const S = `
   .reconnect-filename { font-family: 'DM Mono', monospace; font-size: 0.85rem; color: var(--income); background: rgba(77,247,200,0.08); border: 1px solid rgba(77,247,200,0.2); border-radius: 8px; padding: 8px 14px; margin-bottom: 24px; display: inline-block; }
   .reconnect-actions { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
 
-  /* ── MOBILE ── */
+  /* Mobile storage indicator */
+  .storage-badge { display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px; border-radius: 100px; font-size: 0.7rem; font-family: 'DM Mono', monospace; font-weight: 600; background: rgba(77,247,200,0.1); color: var(--income); border: 1px solid rgba(77,247,200,0.2); margin-top: 6px; }
+
   @media (max-width: 768px) {
     .sidebar { display: none; }
     .bottom-nav { display: flex; }
@@ -476,15 +498,9 @@ export default function App() {
   const [fileName, setFileName] = useState(lsGet() || "");
   const [toasts, setToasts] = useState([]);
   const [editTx, setEditTx] = useState(null);
-  // "idle"      → no stored handle, show welcome
-  // "restoring" → checking IDB for a saved handle on startup
-  // "needs-pick"→ IDB had a handle but needs user permission re-grant
-  // "ready"     → handle active, file loaded
   const [status, setStatus] = useState("restoring");
 
   const fileHandleRef = useRef(null);
-  // Hidden <input type="file"> — used as the universal file picker trigger
-  // (works on all browsers; on Chrome we also get a writable handle afterward)
   const inputRef = useRef();
 
   const toast = useCallback((msg, type = "success") => {
@@ -493,20 +509,37 @@ export default function App() {
     setTimeout(() => setToasts((p) => p.filter((t) => t.id !== id)), 3200);
   }, []);
 
-  // ── On mount: try to restore a previously-saved FileSystemFileHandle from IDB
+  // ── On mount ──────────────────────────────────────────────────────────────
   useEffect(() => {
     (async () => {
+      // ── ANDROID / iOS: load from internal storage automatically, no picker needed
+      if (IS_NATIVE) {
+        try {
+          const parsed = await mobileStorage.load();
+          setTransactions(parsed);
+          setFileLoaded(true);
+          setStatus("ready");
+          // Subtle toast only on subsequent opens (file already has data)
+          if (parsed.length > 0) {
+            toast(`Loaded ${parsed.length} records`, "success");
+          }
+        } catch (err) {
+          toast("Could not load data: " + err.message, "error");
+          setStatus("ready");
+          setFileLoaded(true);
+        }
+        return; // skip web IDB logic entirely
+      }
+
+      // ── WEB: restore FileSystemFileHandle from IndexedDB ──────────────────
       const handle = await idbGet();
       if (!handle) {
-        // No stored handle — check if we at least have a filename (edge case)
         setStatus(lsGet() ? "needs-pick" : "idle");
         return;
       }
-      // We have a handle. Ask for read permission silently (no UI prompt yet).
       try {
         const perm = await handle.queryPermission({ mode: "readwrite" });
         if (perm === "granted") {
-          // Permission still active — load the file automatically
           const file = await handle.getFile();
           const parsed = excelService.parse(await file.arrayBuffer());
           fileHandleRef.current = handle;
@@ -517,27 +550,34 @@ export default function App() {
           setStatus("ready");
           toast(`Resumed "${file.name}" — ${parsed.length} records`, "success");
         } else {
-          // Handle exists but needs a user gesture to re-grant permission
           setFileName(handle.name || lsGet() || "");
-          fileHandleRef.current = handle; // keep it so we can requestPermission later
+          fileHandleRef.current = handle;
           setStatus("needs-pick");
         }
       } catch {
-        // Handle is stale / file moved — fall back to asking user to pick again
         await idbDel();
         setStatus(lsGet() ? "needs-pick" : "idle");
       }
     })();
   }, []);
 
-  // ── Core: save updated transactions back to the file (in-place or download)
+  // ── Persist: save changes ─────────────────────────────────────────────────
   const persist = useCallback(
     async (txList) => {
+      // Android: always write to internal storage silently
+      if (IS_NATIVE) {
+        try {
+          await mobileStorage.save(txList);
+        } catch (err) {
+          toast("Save failed: " + err.message, "error");
+        }
+        return;
+      }
+      // Web: write to file handle or fall back to download
       if (fileHandleRef.current) {
         try {
           await excelService.writeToHandle(fileHandleRef.current, txList);
-        } catch (e) {
-          // Permission revoked mid-session — fall back to download
+        } catch {
           excelService.downloadFile(txList, fileName || "expenses.xlsx");
           toast("Permission lost — file downloaded instead", "info");
         }
@@ -545,31 +585,20 @@ export default function App() {
         excelService.downloadFile(txList, fileName || "expenses.xlsx");
       }
     },
-    [fileName],
+    [fileName, toast],
   );
 
-  // ── Called when <input type="file"> fires (works on all browsers)
+  // ── Web file input handler ────────────────────────────────────────────────
   const handleInputChange = useCallback(
     async (e) => {
       const file = e.target.files?.[0];
       if (!file) return;
-      e.target.value = ""; // reset so same file can be picked again
-
+      e.target.value = "";
       try {
         const parsed = excelService.parse(await file.arrayBuffer());
-
-        // On Chrome/Edge we can request a writable handle for the chosen file
-        // via showOpenFilePicker — but input:file doesn't give us one directly.
-        // So we use showOpenFilePicker when available to get the handle after
-        // the user has already confirmed which file they want via the input.
-        // For Firefox/Safari we store null and fall back to download-on-save.
         let handle = null;
         if ("showOpenFilePicker" in window) {
           try {
-            // User already picked the file via the input — now ask the browser
-            // for a writable handle to the same file via the picker API.
-            // We can't skip the dialog, but we pre-fill the file name so it's
-            // a one-click confirm for the user.
             const [h] = await window.showOpenFilePicker({
               types: [
                 {
@@ -584,20 +613,17 @@ export default function App() {
             });
             handle = h;
           } catch {
-            // User cancelled the second picker or browser refused — no handle, use download fallback
+            /* cancelled */
           }
         }
-
         fileHandleRef.current = handle;
         if (handle) await idbSet(handle);
         else await idbDel();
-
         setFileName(file.name);
         lsSet(file.name);
         setTransactions(parsed);
         setFileLoaded(true);
         setStatus("ready");
-
         toast(`Loaded "${file.name}" — ${parsed.length} records`, "success");
       } catch (err) {
         toast("Failed to read file: " + err.message, "error");
@@ -606,8 +632,6 @@ export default function App() {
     [toast],
   );
 
-  // ── Triggered when user clicks "Open File" on the reconnect screen
-  // We already have a stale handle in fileHandleRef — request permission for it.
   const handleReconnect = useCallback(async () => {
     const handle = fileHandleRef.current;
     if (handle) {
@@ -625,14 +649,22 @@ export default function App() {
           return;
         }
       } catch {
-        /* fall through to input */
+        /* fall through */
       }
     }
-    // Permission denied or no handle — open input picker
     inputRef.current.click();
   }, [toast]);
 
   const handleNewFile = useCallback(async () => {
+    if (IS_NATIVE) {
+      // On mobile "New File" just clears all data and saves empty file
+      setTransactions([]);
+      await mobileStorage.save([]);
+      setFileLoaded(true);
+      setStatus("ready");
+      toast("Started fresh — all data cleared", "info");
+      return;
+    }
     fileHandleRef.current = null;
     await idbDel();
     lsDel();
@@ -641,9 +673,9 @@ export default function App() {
     setFileLoaded(true);
     setStatus("ready");
     toast("New file started — first save will ask where to store it", "info");
-  }, []);
+  }, [toast]);
 
-  // ── CRUD
+  // ── CRUD ──────────────────────────────────────────────────────────────────
   const addTransaction = useCallback(
     (tx) => {
       setTransactions((prev) => {
@@ -653,7 +685,7 @@ export default function App() {
       });
       toast("Transaction saved", "success");
     },
-    [persist],
+    [persist, toast],
   );
 
   const updateTransaction = useCallback(
@@ -670,7 +702,7 @@ export default function App() {
       setEditTx(null);
       toast("Transaction updated", "success");
     },
-    [persist],
+    [persist, toast],
   );
 
   const deleteTransaction = useCallback(
@@ -682,7 +714,7 @@ export default function App() {
       });
       toast("Deleted", "success");
     },
-    [persist],
+    [persist, toast],
   );
 
   const summary = useMemo(() => {
@@ -712,7 +744,7 @@ export default function App() {
     setPage(id);
   };
 
-  // ── Render: decide what to show in main area
+  // ── Main content decision ─────────────────────────────────────────────────
   let mainContent;
   if (status === "restoring") {
     mainContent = (
@@ -803,15 +835,17 @@ export default function App() {
   return (
     <>
       <style>{S}</style>
-      {/* Hidden file input — universal picker, works on all browsers */}
-      <input
-        id="file-pick"
-        ref={inputRef}
-        type="file"
-        accept=".xlsx"
-        style={{ display: "none" }}
-        onChange={handleInputChange}
-      />
+      {/* File input — web only */}
+      {!IS_NATIVE && (
+        <input
+          id="file-pick"
+          ref={inputRef}
+          type="file"
+          accept=".xlsx"
+          style={{ display: "none" }}
+          onChange={handleInputChange}
+        />
+      )}
 
       <div className="app">
         {/* Sidebar */}
@@ -834,37 +868,65 @@ export default function App() {
           </nav>
           <div className="file-zone">
             <div className="file-zone-label">DATA FILE</div>
-            <label
-              className="file-btn"
-              htmlFor="file-pick"
-              style={{ cursor: "pointer" }}
-            >
-              <FolderOpen size={15} /> Open File
-            </label>
-            <div style={{ marginTop: 8 }}>
-              <button className="file-btn" onClick={handleNewFile}>
-                <FilePlus size={15} /> New File
-              </button>
-            </div>
-            {fileLoaded && (
-              <div className="file-status">
-                {fileHandleRef.current ? (
+            {IS_NATIVE ? (
+              // On Android: no file picker — just show storage status + clear option
+              <>
+                <div className="file-status">
                   <CheckCircle
                     size={11}
                     style={{ display: "inline", color: "var(--income)" }}
-                  />
-                ) : (
-                  <AlertTriangle
-                    size={11}
-                    style={{ display: "inline", color: "var(--muted)" }}
-                  />
-                )}{" "}
-                {fileName}
-                <br />
-                <span style={{ opacity: 0.7 }}>
-                  {transactions.length} records
-                </span>
-              </div>
+                  />{" "}
+                  Internal Storage
+                  <br />
+                  <span style={{ opacity: 0.7 }}>
+                    {transactions.length} records · auto-saved
+                  </span>
+                </div>
+                <div className="storage-badge">
+                  <CheckCircle size={11} /> Auto-sync ON
+                </div>
+                <div style={{ marginTop: 12 }}>
+                  <button className="file-btn" onClick={handleNewFile}>
+                    <FilePlus size={15} /> Clear All Data
+                  </button>
+                </div>
+              </>
+            ) : (
+              // Web: show open / new file buttons
+              <>
+                <label
+                  className="file-btn"
+                  htmlFor="file-pick"
+                  style={{ cursor: "pointer" }}
+                >
+                  <FolderOpen size={15} /> Open File
+                </label>
+                <div style={{ marginTop: 8 }}>
+                  <button className="file-btn" onClick={handleNewFile}>
+                    <FilePlus size={15} /> New File
+                  </button>
+                </div>
+                {fileLoaded && (
+                  <div className="file-status">
+                    {fileHandleRef.current ? (
+                      <CheckCircle
+                        size={11}
+                        style={{ display: "inline", color: "var(--income)" }}
+                      />
+                    ) : (
+                      <AlertTriangle
+                        size={11}
+                        style={{ display: "inline", color: "var(--muted)" }}
+                      />
+                    )}{" "}
+                    {fileName}
+                    <br />
+                    <span style={{ opacity: 0.7 }}>
+                      {transactions.length} records
+                    </span>
+                  </div>
+                )}
+              </>
             )}
           </div>
         </aside>
@@ -884,7 +946,6 @@ export default function App() {
         </nav>
 
         <main className="main">{mainContent}</main>
-
         <Toast toasts={toasts} />
       </div>
     </>
@@ -1294,7 +1355,6 @@ function ListPage({ transactions, onEdit, onDelete }) {
         <div className="page-title">Transactions</div>
         <div className="page-sub">{transactions.length} total records</div>
       </div>
-
       <div className="filter-bar">
         <input
           className="search-input"
@@ -1458,6 +1518,7 @@ function ReportsPage({ transactions, toast }) {
     () => dateUtils.filterByPeriod(transactions, period, fromDate, toDate),
     [transactions, period, fromDate, toDate],
   );
+
   const income = filtered
     .filter((t) => t.Type === "Income")
     .reduce((s, t) => s + t.Amount, 0);
@@ -1500,36 +1561,31 @@ function ReportsPage({ transactions, toast }) {
                     : "year",
             )
             .format("YYYY-MM-DD");
-
     const end = period === "custom" ? toDate : dayjs().format("YYYY-MM-DD");
-
+    const reportFileName = `report_${start}_${end}.xlsx`;
     const wb = excelService.generateReport(filtered);
     const buf = excelService.toBuffer(wb);
 
-    const fileName = `report_${start}_${end}.xlsx`;
-
-    // 🌐 WEB
-    if (Capacitor.getPlatform() === "web") {
-      saveAs(new Blob([buf]), fileName);
+    if (IS_NATIVE) {
+      // Save to Documents folder so the user can find/share it
+      const base64 = btoa(
+        new Uint8Array(buf).reduce((d, b) => d + String.fromCharCode(b), ""),
+      );
+      try {
+        await Filesystem.writeFile({
+          path: reportFileName,
+          data: base64,
+          directory: Directory.Documents,
+          recursive: true,
+        });
+        toast(`Report saved to Documents: ${reportFileName}`, "success");
+      } catch (err) {
+        toast("Save failed: " + err.message, "error");
+      }
+    } else {
+      saveAs(new Blob([buf]), reportFileName);
       toast("Report downloaded!", "success");
-      return;
     }
-
-    // 📱 ANDROID
-    const base64 = btoa(
-      new Uint8Array(buf).reduce(
-        (data, byte) => data + String.fromCharCode(byte),
-        "",
-      ),
-    );
-
-    await Filesystem.writeFile({
-      path: fileName,
-      data: base64,
-      directory: Directory.Documents,
-    });
-
-    toast("Report saved to Documents!", "success");
   };
 
   const periods = [
@@ -1557,7 +1613,8 @@ function ReportsPage({ transactions, toast }) {
           <div className="page-sub">Analyze your spending patterns</div>
         </div>
         <button className="btn btn-success" onClick={handleDownload}>
-          <Download size={16} /> Download Excel Report
+          <Download size={16} />{" "}
+          {IS_NATIVE ? "Save Report to Documents" : "Download Excel Report"}
         </button>
       </div>
 
