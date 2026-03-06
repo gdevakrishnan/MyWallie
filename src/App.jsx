@@ -27,7 +27,7 @@ dayjs.extend(weekOfYear);
 // FileSystemFileHandle objects cannot be serialized to JSON/localStorage.
 // IndexedDB is the only place they can be persisted across page loads.
 // We store the handle under a fixed key so we can restore it on reload.
-const IDB_DB = "spend_db";
+const IDB_DB = "mywallie_db";
 const IDB_STORE = "handles";
 const IDB_KEY = "active_file_handle";
 
@@ -77,10 +77,10 @@ async function idbDel() {
 }
 
 // ─── localStorage helpers (for filename display only) ─────────────────────────
-const LS_KEY = "spend_file_name";
-const lsSet = (v) => { try { localStorage.setItem(LS_KEY, v); } catch {} };
-const lsGet = ()  => { try { return localStorage.getItem(LS_KEY); } catch { return null; } };
-const lsDel = ()  => { try { localStorage.removeItem(LS_KEY); } catch {} };
+const LS_KEY = "mywallie_file_name";
+const lsSet = (v) => { try { localStorage.setItem(LS_KEY, v); } catch { } };
+const lsGet = () => { try { return localStorage.getItem(LS_KEY); } catch { return null; } };
+const lsDel = () => { try { localStorage.removeItem(LS_KEY); } catch { } };
 
 // ─── Excel Service ────────────────────────────────────────────────────────────
 const SHEET_NAME = "Transactions";
@@ -110,12 +110,12 @@ const excelService = {
     const rows = XLSX.utils.sheet_to_json(ws, { header: 1 });
     if (rows.length <= 1) return [];
     return rows.slice(1).filter(r => r[0]).map(r => ({
-      ID:        String(r[0] || ""),
-      Date:      r[1] ? String(r[1]) : dayjs().format("YYYY-MM-DD"),
-      Type:      r[2] || "Expense",
-      Category:  r[3] || "",
-      Amount:    Number(r[4]) || 0,
-      Notes:     r[5] || "",
+      ID: String(r[0] || ""),
+      Date: r[1] ? String(r[1]) : dayjs().format("YYYY-MM-DD"),
+      Type: r[2] || "Expense",
+      Category: r[3] || "",
+      Amount: Number(r[4]) || 0,
+      Notes: r[5] || "",
       CreatedAt: r[6] || new Date().toISOString(),
     }));
   },
@@ -134,7 +134,7 @@ const excelService = {
 
   generateReport(transactions) {
     const wb = XLSX.utils.book_new();
-    const income  = transactions.filter(t => t.Type === "Income").reduce((s, t) => s + t.Amount, 0);
+    const income = transactions.filter(t => t.Type === "Income").reduce((s, t) => s + t.Amount, 0);
     const expense = transactions.filter(t => t.Type === "Expense").reduce((s, t) => s + t.Amount, 0);
     const rows = [
       HEADERS,
@@ -155,10 +155,10 @@ const dateUtils = {
     const today = dayjs();
     return transactions.filter(t => {
       const d = dayjs(t.Date);
-      if (period === "daily")   return d.isSame(today, "day");
-      if (period === "weekly")  return d.isSame(today, "week");
+      if (period === "daily") return d.isSame(today, "day");
+      if (period === "weekly") return d.isSame(today, "week");
       if (period === "monthly") return d.isSame(today, "month");
-      if (period === "yearly")  return d.isSame(today, "year");
+      if (period === "yearly") return d.isSame(today, "year");
       if (period === "custom" && from && to)
         return d.isSameOrAfter(dayjs(from), "day") && d.isSameOrBefore(dayjs(to), "day");
       return true;
@@ -185,21 +185,21 @@ const S = `
   .logo span { color: var(--accent); }
   .logo-sub { font-size: 0.7rem; color: var(--muted); font-family: 'DM Mono', monospace; margin-bottom: 36px; letter-spacing: 0.1em; }
   .nav { display: flex; flex-direction: column; gap: 4px; flex: 1; }
-  .nav-item { display: flex; align-items: center; gap: 12px; padding: 11px 14px; border-radius: var(--radius-sm); transition: all 0.18s; color: var(--muted); font-weight: 500; font-size: 0.88rem; border: none; background: none; text-align: left; width: 100%; }
+  .nav-item { display: flex; align-items: center; gap: 12px; padding: 11px 14px; border-radius: var(--radius-sm); cursor: pointer; transition: all 0.18s; color: var(--muted); font-weight: 500; font-size: 0.88rem; border: none; background: none; text-align: left; width: 100%; }
   .nav-item:hover { background: var(--surface2); color: var(--text); }
   .nav-item.active { background: var(--accent); color: #fff; }
   .nav-icon { width: 20px; text-align: center; flex-shrink: 0; display:flex; align-items:center; justify-content:center; }
 
   /* Bottom nav — mobile only */
   .bottom-nav { display: none; position: fixed; bottom: 0; left: 0; right: 0; z-index: 100; background: var(--surface); border-top: 1px solid var(--border); padding: 6px 0 max(8px, env(safe-area-inset-bottom)); justify-content: space-around; align-items: stretch; }
-  .bottom-nav-item { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 6px 8px; border: none; background: none; color: var(--muted); font-family: 'Syne', sans-serif; font-size: 0.6rem; font-weight: 600; transition: color 0.15s; flex: 1; min-width: 0; }
+  .bottom-nav-item { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 6px 8px; border: none; background: none; cursor: pointer; color: var(--muted); font-family: 'Syne', sans-serif; font-size: 0.6rem; font-weight: 600; transition: color 0.15s; flex: 1; min-width: 0; }
   .bottom-nav-item svg { margin-bottom: 1px; }
   .bottom-nav-item.active { color: var(--accent); }
 
   /* File zone */
   .file-zone { margin-top: 24px; border-top: 1px solid var(--border); padding-top: 16px; }
   .file-zone-label { font-size: 0.7rem; color: var(--muted); font-family: 'DM Mono', monospace; letter-spacing: 0.1em; margin-bottom: 10px; }
-  .file-btn { width: 100%; padding: 9px 12px; border-radius: var(--radius-sm); background: var(--surface2); border: 1px dashed var(--border); color: var(--muted); font-size: 0.8rem; font-family: 'Syne', sans-serif; transition: all 0.18s; display: flex; align-items: center; gap: 8px; }
+  .file-btn { width: 100%; padding: 9px 12px; border-radius: var(--radius-sm); background: var(--surface2); border: 1px dashed var(--border); color: var(--muted); font-size: 0.8rem; font-family: 'Syne', sans-serif; cursor: pointer; transition: all 0.18s; display: flex; align-items: center; gap: 8px; }
   .file-btn:hover { border-color: var(--accent); color: var(--accent); }
   .file-status { font-size: 0.72rem; color: var(--income); margin-top: 8px; font-family: 'DM Mono', monospace; line-height: 1.6; }
 
@@ -249,7 +249,7 @@ const S = `
   .amount.income { color: var(--income); font-weight: 700; font-family: 'DM Mono', monospace; }
   .amount.expense { color: var(--expense); font-weight: 700; font-family: 'DM Mono', monospace; }
   .actions { display: flex; gap: 8px; }
-  .btn-icon { background: var(--surface3); border: none; border-radius: 8px; padding: 7px 10px; font-size: 0.85rem; transition: all 0.15s; color: var(--muted); }
+  .btn-icon { background: var(--surface3); border: none; border-radius: 8px; padding: 7px 10px; cursor: pointer; font-size: 0.85rem; transition: all 0.15s; color: var(--muted); }
   .btn-icon:hover { background: var(--accent); color: #fff; }
   .btn-icon.del:hover { background: var(--expense); color: #fff; }
 
@@ -264,7 +264,7 @@ const S = `
   select option { background: var(--surface2); }
   textarea { resize: vertical; min-height: 80px; }
 
-  .btn { display: inline-flex; align-items: center; gap: 8px; padding: 11px 22px; border-radius: var(--radius-sm); border: none; font-family: 'Syne', sans-serif; font-weight: 700; font-size: 0.88rem; transition: all 0.18s; }
+  .btn { display: inline-flex; align-items: center; gap: 8px; padding: 11px 22px; border-radius: var(--radius-sm); border: none; cursor: pointer; font-family: 'Syne', sans-serif; font-weight: 700; font-size: 0.88rem; transition: all 0.18s; }
   .btn-primary { background: var(--accent); color: #fff; }
   .btn-primary:hover { background: #6a58e5; transform: translateY(-1px); }
   .btn-secondary { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
@@ -285,7 +285,7 @@ const S = `
   .filter-bar { display: flex; gap: 12px; margin-bottom: 20px; align-items: center; flex-wrap: wrap; }
   .search-input { flex: 1; min-width: 180px; max-width: 260px; }
   .filter-buttons { display: flex; gap: 8px; flex-wrap: wrap; }
-  .filter-btn { padding: 8px 14px; border-radius: 100px; border: 1px solid var(--border); background: var(--surface2); color: var(--muted); font-family: 'Syne', sans-serif; font-size: 0.8rem; font-weight: 600; transition: all 0.15s; }
+  .filter-btn { padding: 8px 14px; border-radius: 100px; border: 1px solid var(--border); background: var(--surface2); color: var(--muted); font-family: 'Syne', sans-serif; font-size: 0.8rem; font-weight: 600; cursor: pointer; transition: all 0.15s; }
   .filter-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
   .filter-btn:hover:not(.active) { border-color: var(--accent); color: var(--accent); }
 
@@ -308,7 +308,7 @@ const S = `
   .welcome-title { font-size: 1.5rem; font-weight: 800; margin-bottom: 8px; }
   .welcome-sub { color: var(--muted); font-size: 0.88rem; margin-bottom: 32px; line-height: 1.6; }
   .welcome-actions { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
-  .file-input-label { display: inline-flex; align-items: center; gap: 8px; padding: 11px 22px; border-radius: var(--radius-sm); background: var(--accent); color: #fff; font-family: 'Syne', sans-serif; font-weight: 700; font-size: 0.88rem; transition: all 0.18s; border: none; }
+  .file-input-label { display: inline-flex; align-items: center; gap: 8px; padding: 11px 22px; border-radius: var(--radius-sm); background: var(--accent); color: #fff; font-family: 'Syne', sans-serif; font-weight: 700; font-size: 0.88rem; cursor: pointer; transition: all 0.18s; border: none; }
   .file-input-label:hover { background: #6a58e5; transform: translateY(-1px); }
 
   /* Reconnect banner */
@@ -528,6 +528,10 @@ export default function App() {
   }, [persist]);
 
   const updateTransaction = useCallback((tx) => {
+    if (!tx) {
+      setEditTx(null);
+      return;
+    }
     setTransactions(prev => { const u = prev.map(t => t.ID === tx.ID ? tx : t); persist(u); return u; });
     setEditTx(null);
     toast("Transaction updated", "success");
@@ -539,19 +543,22 @@ export default function App() {
   }, [persist]);
 
   const summary = useMemo(() => {
-    const income  = transactions.filter(t => t.Type === "Income").reduce((s, t) => s + t.Amount, 0);
+    const income = transactions.filter(t => t.Type === "Income").reduce((s, t) => s + t.Amount, 0);
     const expense = transactions.filter(t => t.Type === "Expense").reduce((s, t) => s + t.Amount, 0);
     return { income, expense, net: income - expense, count: transactions.length };
   }, [transactions]);
 
   const navItems = [
     { id: "dashboard", icon: LayoutDashboard, label: "Dashboard" },
-    { id: "add",       icon: PlusCircle,      label: "New Transaction" },
-    { id: "list",      icon: List,            label: "Transactions" },
-    { id: "reports",   icon: BarChart2,       label: "Reports" },
+    { id: "add", icon: PlusCircle, label: "Add Transaction" },
+    { id: "list", icon: List, label: "Transactions" },
+    { id: "reports", icon: BarChart2, label: "Reports" },
   ];
 
-  const goPage = (id) => { setPage(id); setEditTx(null); };
+  const goPage = (id) => {
+    if (id !== 'add') setEditTx(null);
+    setPage(id);
+  };
 
   // ── Render: decide what to show in main area
   let mainContent;
@@ -580,7 +587,7 @@ export default function App() {
       mainContent = (
         <div className="welcome-wrap">
           <div className="welcome-icon"><FileSpreadsheet size={56} strokeWidth={1.2} /></div>
-          <div className="welcome-title">Welcome to MyWallie</div>
+          <div className="welcome-title">Welcome to MyWallie.</div>
           <div className="welcome-sub">
             Select your <strong>expenses.xlsx</strong> to get started.<br />
             The app saves changes directly back to the file — no repeated download dialogs.
@@ -595,10 +602,13 @@ export default function App() {
       );
     }
   } else {
-    if      (page === "dashboard") mainContent = <DashboardPage summary={summary} transactions={transactions} />;
-    else if (page === "add")       mainContent = <AddPage onAdd={addTransaction} onUpdate={updateTransaction} editTx={editTx} />;
-    else if (page === "list")      mainContent = <ListPage transactions={transactions} onEdit={tx => { setEditTx(tx); goPage("add"); }} onDelete={deleteTransaction} />;
-    else                           mainContent = <ReportsPage transactions={transactions} toast={toast} />;
+    if (page === "dashboard") mainContent = <DashboardPage summary={summary} transactions={transactions} />;
+    else if (page === "add") mainContent = <AddPage onAdd={addTransaction} onUpdate={updateTransaction} editTx={editTx} />;
+    else if (page === "list") mainContent = <ListPage transactions={transactions} onEdit={tx => {
+      setEditTx(tx);
+      goPage("add");
+    }} onDelete={deleteTransaction} />;
+    else mainContent = <ReportsPage transactions={transactions} toast={toast} />;
   }
 
   return (
@@ -629,7 +639,7 @@ export default function App() {
           </nav>
           <div className="file-zone">
             <div className="file-zone-label">DATA FILE</div>
-            <label className="file-btn" htmlFor="file-pick">
+            <label className="file-btn" htmlFor="file-pick" style={{ cursor: "pointer" }}>
               <FolderOpen size={15} /> Open File
             </label>
             <div style={{ marginTop: 8 }}>
@@ -639,7 +649,7 @@ export default function App() {
             </div>
             {fileLoaded && (
               <div className="file-status">
-                {fileHandleRef.current ? <CheckCircle size={11} style={{display:"inline",color:"var(--income)"}} /> : <AlertTriangle size={11} style={{display:"inline",color:"var(--muted)"}} />} {fileName}
+                {fileHandleRef.current ? <CheckCircle size={11} style={{ display: "inline", color: "var(--income)" }} /> : <AlertTriangle size={11} style={{ display: "inline", color: "var(--muted)" }} />} {fileName}
                 <br />
                 <span style={{ opacity: 0.7 }}>{transactions.length} records</span>
               </div>
@@ -767,11 +777,14 @@ function DashboardPage({ summary, transactions }) {
 
 // ─── Add / Edit ───────────────────────────────────────────────────────────────
 function AddPage({ onAdd, onUpdate, editTx }) {
-  const empty = { Date: dayjs().format("YYYY-MM-DD"), Type: "Expense", Category: "", Amount: "", Notes: "" };
-  const [form, setForm] = useState(editTx || empty);
+  const getEmpty = () => ({ Date: dayjs().format("YYYY-MM-DD"), Type: "Expense", Category: "", Amount: "", Notes: "" });
+  const [form, setForm] = useState(editTx || getEmpty());
   const [errors, setErrors] = useState({});
 
-  useEffect(() => { setForm(editTx || empty); }, [editTx]);
+  useEffect(() => {
+    setForm(editTx || getEmpty());
+    setErrors({});
+  }, [editTx]);
 
   const set = (k, v) => { setForm(f => ({ ...f, [k]: v })); setErrors(e => ({ ...e, [k]: "" })); };
 
@@ -786,19 +799,20 @@ function AddPage({ onAdd, onUpdate, editTx }) {
 
   const handleSubmit = () => {
     if (!validate()) return;
+    console.log(form);
     const tx = { ...form, Amount: Number(form.Amount) };
     if (editTx) {
       onUpdate({ ...tx, ID: editTx.ID, CreatedAt: editTx.CreatedAt });
     } else {
       onAdd({ ...tx, ID: String(Date.now()), CreatedAt: new Date().toISOString() });
-      setForm(empty);
+      setForm(getEmpty());
     }
   };
 
   return (
     <div>
       <div className="page-header">
-        <div className="page-title">{editTx ? "Edit Transaction" : "New Transaction"}</div>
+        <div className="page-title">{editTx ? "Edit Transaction" : "Add Transaction"}</div>
         <div className="page-sub">{editTx ? `Editing ID: ${editTx.ID}` : "Record a new income or expense"}</div>
       </div>
       <div className="form-card">
@@ -938,7 +952,7 @@ function ReportsPage({ transactions, toast }) {
   const [toDate, setToDate] = useState(dayjs().format("YYYY-MM-DD"));
 
   const filtered = useMemo(() => dateUtils.filterByPeriod(transactions, period, fromDate, toDate), [transactions, period, fromDate, toDate]);
-  const income  = filtered.filter(t => t.Type === "Income").reduce((s, t) => s + t.Amount, 0);
+  const income = filtered.filter(t => t.Type === "Income").reduce((s, t) => s + t.Amount, 0);
   const expense = filtered.filter(t => t.Type === "Expense").reduce((s, t) => s + t.Amount, 0);
   const net = income - expense;
   const fmt = n => new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(n);
@@ -951,8 +965,8 @@ function ReportsPage({ transactions, toast }) {
 
   const handleDownload = () => {
     const start = period === "custom" ? fromDate : dayjs().startOf(period === "daily" ? "day" : period === "weekly" ? "week" : period === "monthly" ? "month" : "year").format("YYYY-MM-DD");
-    const end   = period === "custom" ? toDate   : dayjs().format("YYYY-MM-DD");
-    const wb  = excelService.generateReport(filtered);
+    const end = period === "custom" ? toDate : dayjs().format("YYYY-MM-DD");
+    const wb = excelService.generateReport(filtered);
     const buf = excelService.toBuffer(wb);
     saveAs(new Blob([buf]), `report_${start}_${end}.xlsx`);
     toast("Report downloaded!", "success");
