@@ -18,6 +18,7 @@ import {
   FileSpreadsheet, Wallet, CheckCheck, AlertTriangle,
   Download, Upload, Share2,
 } from "lucide-react";
+import { Share } from "@capacitor/share";
 
 dayjs.extend(isBetween);
 dayjs.extend(isSameOrBefore);
@@ -25,9 +26,79 @@ dayjs.extend(isSameOrAfter);
 dayjs.extend(weekOfYear);
 
 // ─── Platform ─────────────────────────────────────────────────────────────────
-const IS_NATIVE   = Capacitor.isNativePlatform();
-const MOBILE_FILE = "mywallie_data.xlsx";  // Directory.Data — private, always writable
-const MOBILE_READY_KEY = "mywallie_ready"; // localStorage flag: user completed setup
+// Safe platform check: works correctly in dev AND production Capacitor/Vite builds
+const IS_NATIVE = (() => {
+  try { return Capacitor.isNativePlatform(); } catch { return false; }
+})();
+const MOBILE_FILE      = "mywallie_data.xlsx";
+const MOBILE_READY_KEY = "mywallie_ready";
+
+// Safe localStorage helpers
+const safeLS = {
+  get: (k)    => { try { return localStorage.getItem(k); }    catch { return null; } },
+  set: (k, v) => { try { localStorage.setItem(k, v); }        catch {} },
+  del: (k)    => { try { localStorage.removeItem(k); }         catch {} },
+};
+
+// ── Web data store (IndexedDB) ────────────────────────────────────────────────
+// Stores transaction data directly in IDB so it survives reloads without a
+// FileSystemFileHandle. The file handle is kept only for explicit "sync to file"
+// — it is NEVER required for normal add/edit/delete persistence.
+const WEB_IDB_DB      = "mywallie_db";
+const WEB_IDB_DATA    = "data";        // store: transaction data
+const WEB_IDB_HANDLES = "handles";     // store: FileSystemFileHandle
+
+function openWebIDB() {
+  return new Promise((res, rej) => {
+    const r = indexedDB.open(WEB_IDB_DB, 2); // version 2 adds data store
+    r.onupgradeneeded = (e) => {
+      const db = e.target.result;
+      if (!db.objectStoreNames.contains(WEB_IDB_HANDLES)) db.createObjectStore(WEB_IDB_HANDLES);
+      if (!db.objectStoreNames.contains(WEB_IDB_DATA))    db.createObjectStore(WEB_IDB_DATA);
+    };
+    r.onsuccess = (e) => res(e.target.result);
+    r.onerror   = () => rej(r.error);
+  });
+}
+
+// Save transactions to IDB (web equivalent of mobileStorage.save)
+async function webDataSave(transactions) {
+  try {
+    const db = await openWebIDB();
+    await new Promise((res, rej) => {
+      const tx = db.transaction(WEB_IDB_DATA, "readwrite");
+      tx.objectStore(WEB_IDB_DATA).put(JSON.stringify(transactions), "transactions");
+      tx.oncomplete = res; tx.onerror = () => rej(tx.error);
+    });
+  } catch (e) { console.error("webDataSave failed", e); }
+}
+
+// Load transactions from IDB — returns null if nothing saved yet
+async function webDataLoad() {
+  try {
+    const db = await openWebIDB();
+    return new Promise((res, rej) => {
+      const tx = db.transaction(WEB_IDB_DATA, "readonly");
+      const req = tx.objectStore(WEB_IDB_DATA).get("transactions");
+      req.onsuccess = () => {
+        const val = req.result;
+        res(val ? JSON.parse(val) : null);
+      };
+      req.onerror = () => rej(req.error);
+    });
+  } catch { return null; }
+}
+
+async function webDataClear() {
+  try {
+    const db = await openWebIDB();
+    await new Promise((res, rej) => {
+      const tx = db.transaction(WEB_IDB_DATA, "readwrite");
+      tx.objectStore(WEB_IDB_DATA).clear();
+      tx.oncomplete = res; tx.onerror = () => rej(tx.error);
+    });
+  } catch {}
+}
 
 // ─── Mobile storage ───────────────────────────────────────────────────────────
 const mobileStorage = {
@@ -59,7 +130,7 @@ const mobileStorage = {
   /** Delete internal file + clear setup flag → returns user to setup screen */
   async clear() {
     try { await Filesystem.deleteFile({ path: MOBILE_FILE, directory: Directory.Data }); } catch {}
-    localStorage.removeItem(MOBILE_READY_KEY);
+    safeLS.del(MOBILE_READY_KEY);
   },
 
   /**
@@ -71,7 +142,6 @@ const mobileStorage = {
     const base64 = toBase64(excelService.toBuffer(excelService.generateReport(reportTransactions)));
     await Filesystem.writeFile({ path: fileName, data: base64, directory: Directory.Cache, recursive: true });
     const { uri } = await Filesystem.getUri({ path: fileName, directory: Directory.Cache });
-    const { Share } = await import("@capacitor/share");
     await Share.share({ title: "MyWallie Report", url: uri, dialogTitle: "Share / Save Report" });
   },
 };
@@ -81,50 +151,41 @@ function toBase64(buf) {
 }
 
 // ─── IndexedDB handle store (web only) ───────────────────────────────────────
-const IDB_DB = "mywallie_db", IDB_STORE = "handles", IDB_KEY = "active_file_handle";
-function openIDB() {
-  return new Promise((res, rej) => {
-    const r = indexedDB.open(IDB_DB, 1);
-    r.onupgradeneeded = (e) => e.target.result.createObjectStore(IDB_STORE);
-    r.onsuccess = (e) => res(e.target.result);
-    r.onerror   = () => rej(r.error);
-  });
-}
-async function idbSet(val) {
+// File handle persistence (web only — optional, for "sync back to file" feature)
+const IDB_HANDLE_KEY = "active_file_handle";
+async function handleSave(val) {
   try {
-    const db = await openIDB();
+    const db = await openWebIDB();
     await new Promise((r, j) => {
-      const t = db.transaction(IDB_STORE, "readwrite");
-      t.objectStore(IDB_STORE).put(val, IDB_KEY);
+      const t = db.transaction(WEB_IDB_HANDLES, "readwrite");
+      t.objectStore(WEB_IDB_HANDLES).put(val, IDB_HANDLE_KEY);
       t.oncomplete = r; t.onerror = () => j(t.error);
     });
   } catch {}
 }
-async function idbGet() {
+async function handleLoad() {
   try {
-    const db = await openIDB();
+    const db = await openWebIDB();
     return new Promise((r, j) => {
-      const t = db.transaction(IDB_STORE, "readonly");
-      const q = t.objectStore(IDB_STORE).get(IDB_KEY);
+      const t = db.transaction(WEB_IDB_HANDLES, "readonly");
+      const q = t.objectStore(WEB_IDB_HANDLES).get(IDB_HANDLE_KEY);
       q.onsuccess = () => r(q.result ?? null); q.onerror = () => j(q.error);
     });
   } catch { return null; }
 }
-async function idbDel() {
+async function handleClear() {
   try {
-    const db = await openIDB();
+    const db = await openWebIDB();
     await new Promise((r, j) => {
-      const t = db.transaction(IDB_STORE, "readwrite");
-      t.objectStore(IDB_STORE).delete(IDB_KEY);
+      const t = db.transaction(WEB_IDB_HANDLES, "readwrite");
+      t.objectStore(WEB_IDB_HANDLES).delete(IDB_HANDLE_KEY);
       t.oncomplete = r; t.onerror = () => j(t.error);
     });
   } catch {}
 }
 
 const LS_KEY = "mywallie_file_name";
-const lsSet  = (v) => { try { localStorage.setItem(LS_KEY, v); } catch {} };
-const lsGet  = ()  => { try { return localStorage.getItem(LS_KEY); } catch { return null; } };
-const lsDel  = ()  => { try { localStorage.removeItem(LS_KEY); } catch {} };
+// Use safeLS wrapper defined above for all localStorage access
 
 // ─── Excel Service ────────────────────────────────────────────────────────────
 const SHEET_NAME = "Transactions";
@@ -420,7 +481,7 @@ export default function App() {
   const [page, setPage]                   = useState("dashboard");
   const [transactions, setTransactions]   = useState([]);
   const [fileLoaded, setFileLoaded]       = useState(false);
-  const [fileName, setFileName]           = useState(lsGet() || "");
+  const [fileName, setFileName]           = useState(safeLS.get(LS_KEY) || "");
   const [toasts, setToasts]               = useState([]);
   const [editTx, setEditTx]               = useState(null);
   // "restoring"    → checking storage on mount
@@ -444,13 +505,9 @@ export default function App() {
   useEffect(() => {
     (async () => {
       if (IS_NATIVE) {
-        const isReady = localStorage.getItem(MOBILE_READY_KEY);
-        if (!isReady) {
-          // First-ever launch → show setup choice screen
-          setStatus("mobile-setup");
-          return;
-        }
-        // Already set up → load data from internal storage
+        // Android: check if first-ever launch
+        const isReady = safeLS.get(MOBILE_READY_KEY);
+        if (!isReady) { setStatus("mobile-setup"); return; }
         const parsed = await mobileStorage.load();
         setTransactions(parsed);
         setFileLoaded(true);
@@ -459,26 +516,39 @@ export default function App() {
         return;
       }
 
-      // Web: try to restore FileSystemFileHandle from IndexedDB
-      const handle = await idbGet();
-      if (!handle) { setStatus(lsGet() ? "needs-pick" : "idle"); return; }
-      try {
-        const perm = await handle.queryPermission({ mode:"readwrite" });
-        if (perm === "granted") {
-          const file   = await handle.getFile();
-          const parsed = excelService.parse(await file.arrayBuffer());
-          fileHandleRef.current = handle;
-          setFileName(file.name); lsSet(file.name);
-          setTransactions(parsed); setFileLoaded(true); setStatus("ready");
-          toast(`Resumed "${file.name}" — ${parsed.length} records`, "success");
-        } else {
-          setFileName(handle.name || lsGet() || "");
-          fileHandleRef.current = handle;
-          setStatus("needs-pick");
-        }
-      } catch {
-        await idbDel();
-        setStatus(lsGet() ? "needs-pick" : "idle");
+      // ── Web production-safe startup ──────────────────────────────────────
+      // Step 1: Always load data from IDB first — this ALWAYS works, no permission needed.
+      const saved = await webDataLoad();
+      if (saved !== null) {
+        // We have persisted data — restore it immediately
+        setTransactions(saved);
+        setFileLoaded(true);
+        setStatus("ready");
+        // Step 2: Silently try to re-attach the file handle (optional — for sync-to-file)
+        // If it fails (permission expired etc.) we just skip it — data is already loaded
+        try {
+          const handle = await handleLoad();
+          if (handle) {
+            const perm = await handle.queryPermission({ mode: "readwrite" });
+            if (perm === "granted") {
+              fileHandleRef.current = handle;
+              setFileName(handle.name || safeLS.get(LS_KEY) || "");
+            }
+            // else: handle exists but permission expired — that's fine, data is in IDB
+          }
+        } catch { /* ignore — handle is optional */ }
+        if (saved.length > 0) toast(`${saved.length} records loaded`, "success");
+        return;
+      }
+
+      // Step 3: No IDB data yet — check if user had a file before (legacy or fresh)
+      const storedName = safeLS.get(LS_KEY);
+      if (storedName) {
+        // Had a file before — offer to re-open it
+        setStatus("needs-pick");
+      } else {
+        // Truly fresh — show welcome screen
+        setStatus("idle");
       }
     })();
   }, []);
@@ -488,26 +558,34 @@ export default function App() {
   // On web: writes to file handle, falls back to download only if permission lost.
   const persist = useCallback(async (txList) => {
     if (IS_NATIVE) {
+      // Android: silently write to internal storage — never downloads
       try { await mobileStorage.save(txList); }
       catch (err) { toast("Auto-save failed: " + err.message, "error"); }
       return;
     }
+
+    // Web: ALWAYS save to IDB first — guaranteed to work in production, no permissions
+    await webDataSave(txList);
+
+    // Then ALSO try to sync to the linked .xlsx file if the user has one open
+    // This is a bonus "keep the file in sync" — failure here is silent and non-blocking
     if (fileHandleRef.current) {
       try { await excelService.writeToHandle(fileHandleRef.current, txList); }
       catch {
-        excelService.downloadFile(txList, fileName || "expenses.xlsx");
-        toast("Permission lost — file downloaded instead", "info");
+        // Permission expired — clear the stale handle, data is safe in IDB
+        fileHandleRef.current = null;
+        await handleClear();
       }
-    } else {
-      excelService.downloadFile(txList, fileName || "expenses.xlsx");
     }
-  }, [fileName, toast]);
+    // Note: we NEVER auto-download on CRUD operations anymore.
+    // Downloads only happen from the explicit "Download Report" button in Reports.
+  }, [toast]);
 
   // ── Android: "New File" from setup screen ────────────────────────────────
   const handleMobileNew = useCallback(async () => {
     try {
       await mobileStorage.save([]);
-      localStorage.setItem(MOBILE_READY_KEY, "1");
+      safeLS.set(MOBILE_READY_KEY, "1");
       setTransactions([]);
       setFileLoaded(true);
       setStatus("ready");
@@ -530,7 +608,7 @@ export default function App() {
       const parsed = excelService.parse(await file.arrayBuffer());
       // Save imported data to internal storage (this is the only write that happens)
       await mobileStorage.save(parsed);
-      localStorage.setItem(MOBILE_READY_KEY, "1");
+      safeLS.set(MOBILE_READY_KEY, "1");
       setTransactions(parsed);
       setFileLoaded(true);
       setStatus("ready");
@@ -568,8 +646,11 @@ export default function App() {
         } catch {}
       }
       fileHandleRef.current = handle;
-      if (handle) await idbSet(handle); else await idbDel();
-      setFileName(file.name); lsSet(file.name);
+      if (handle) await handleSave(handle); else await handleClear();
+      safeLS.set(LS_KEY, file.name);
+      setFileName(file.name);
+      // Save to IDB so data persists even if file handle permission expires later
+      await webDataSave(parsed);
       setTransactions(parsed); setFileLoaded(true); setStatus("ready");
       toast(`Loaded "${file.name}" — ${parsed.length} records`, "success");
     } catch (err) {
@@ -585,7 +666,9 @@ export default function App() {
         if (perm === "granted") {
           const file   = await handle.getFile();
           const parsed = excelService.parse(await file.arrayBuffer());
-          setFileName(file.name); lsSet(file.name);
+          safeLS.set(LS_KEY, file.name);
+          setFileName(file.name);
+          await webDataSave(parsed);
           setTransactions(parsed); setFileLoaded(true); setStatus("ready");
           toast(`Resumed "${file.name}"`, "success");
           return;
@@ -597,10 +680,12 @@ export default function App() {
 
   const handleWebNew = useCallback(async () => {
     fileHandleRef.current = null;
-    await idbDel(); lsDel();
+    await handleClear();
+    await webDataClear();
+    safeLS.del(LS_KEY);
     setFileName("expenses.xlsx");
     setTransactions([]); setFileLoaded(true); setStatus("ready");
-    toast("New file started — first save will download a copy", "info");
+    toast("New file ready — add your first transaction!", "success");
   }, [toast]);
 
   // ── CRUD — all call persist() which NEVER downloads on Android ───────────
@@ -756,21 +841,33 @@ export default function App() {
               )
             ) : (
               <>
-                <label className="file-btn" htmlFor="web-file-pick" style={{ cursor:"pointer" }}>
-                  <FolderOpen size={15}/> Open File
-                </label>
-                <div style={{ marginTop:8 }}>
-                  <button className="file-btn" onClick={handleWebNew}><FilePlus size={15}/> New File</button>
-                </div>
-                {fileLoaded && (
-                  <div className="file-status">
-                    {fileHandleRef.current
-                      ? <CheckCircle size={11} style={{ display:"inline", color:"var(--income)" }}/>
-                      : <AlertTriangle size={11} style={{ display:"inline", color:"var(--muted)" }}/>
-                    }{" "}
-                    {fileName}<br/>
-                    <span style={{ opacity:0.7 }}>{transactions.length} records</span>
-                  </div>
+                {fileLoaded ? (
+                  <>
+                    <div className="file-status">
+                      {fileHandleRef.current && (
+                        <><br/><span style={{ opacity:0.7, fontSize:"0.68rem" }}>⇄ Syncing to {fileName}</span></>
+                      )}
+                    </div>
+                    <div className="storage-badge"><CheckCircle size={11}/> Auto-sync ON</div>
+                    <div style={{ marginTop:12, display:"flex", flexDirection:"column", gap:8 }}>
+                      <label className="file-btn" htmlFor="web-file-pick" style={{ cursor:"pointer" }}>
+                        <FolderOpen size={15}/> Link to File
+                      </label>
+                      <button className="file-btn" onClick={() => excelService.downloadFile(transactions, fileName || "expenses.xlsx")}>
+                        <Download size={15}/> Export .xlsx
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  // No data yet
+                  <>
+                    <label className="file-btn" htmlFor="web-file-pick" style={{ cursor:"pointer" }}>
+                      <FolderOpen size={15}/> Open File
+                    </label>
+                    <div style={{ marginTop:8 }}>
+                      <button className="file-btn" onClick={handleWebNew}><FilePlus size={15}/> New File</button>
+                    </div>
+                  </>
                 )}
               </>
             )}
@@ -1050,7 +1147,7 @@ function ReportsPage({ transactions, toast }) {
       <div className="page-header" style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between", flexWrap:"wrap", gap:16 }}>
         <div><div className="page-title">Reports</div><div className="page-sub">Analyze your spending patterns</div></div>
         <button className="btn btn-success" onClick={handleDownload}>
-          {IS_NATIVE ? <><Share2 size={16}/> Share Report</> : <><Download size={16}/> Report</>}
+          {IS_NATIVE ? <><Share2 size={16}/> Share Report</> : <><Download size={16}/> Download Report</>}
         </button>
       </div>
       <div className="filter-row">
