@@ -83,8 +83,14 @@ async function idbLoad() {
   if (!raw) return null;
   try { return JSON.parse(raw); } catch { return null; }
 }
-async function idbSaveMeta(fileName) { await idbPut("fileName", fileName); }
-async function idbLoadMeta() { return await idbGet("fileName"); }
+async function idbSaveMeta(fileName, synced = false) {
+  await idbPut("fileName", fileName);
+  await idbPut("synced", synced ? "1" : "0");
+}
+async function idbLoadMeta() {
+  const [name, synced] = await Promise.all([idbGet("fileName"), idbGet("synced")]);
+  return { name: name || "", synced: synced === "1" };
+}
 
 async function idbClear() {
   try {
@@ -400,6 +406,17 @@ const S = `
   @media (max-width:400px){
     .cards{grid-template-columns:1fr}
   }
+
+  /* ── Modal ── */
+  .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(4px)}
+  .modal{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:32px;max-width:420px;width:100%;animation:modalIn 0.2s ease}
+  @keyframes modalIn{from{transform:scale(0.92);opacity:0}to{transform:none;opacity:1}}
+  .modal-title{font-size:1.1rem;font-weight:800;margin-bottom:10px}
+  .modal-body{color:var(--muted);font-size:0.88rem;line-height:1.7;margin-bottom:26px}
+  .modal-actions{display:flex;gap:10px;justify-content:flex-end}
+  .btn-danger{background:var(--expense);color:#fff;display:inline-flex;align-items:center;gap:8px;padding:11px 22px;border-radius:var(--radius-sm);border:none;cursor:pointer;font-family:'Syne',sans-serif;font-weight:700;font-size:0.88rem;transition:all 0.18s}
+  .btn-danger:hover{filter:brightness(0.88)}
+
 `;
 
 // ─── Toast ────────────────────────────────────────────────────────────────────
@@ -412,6 +429,28 @@ function Toast({ toasts }) {
           {t.msg}
         </div>
       ))}
+    </div>
+  );
+}
+
+
+// ─── Modal ────────────────────────────────────────────────────────────────────
+function Modal({ title, body, confirmLabel = "Confirm", confirmClass = "btn-danger", onConfirm, onCancel, cancelLabel = "Cancel" }) {
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onCancel(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onCancel]);
+  return (
+    <div className="modal-overlay" onClick={e=>{ if(e.target===e.currentTarget) onCancel(); }}>
+      <div className="modal">
+        <div className="modal-title">{title}</div>
+        <div className="modal-body">{body}</div>
+        <div className="modal-actions">
+          <button className="btn btn-secondary" onClick={onCancel}>{cancelLabel}</button>
+          <button className={confirmClass} onClick={onConfirm}>{confirmLabel}</button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -486,8 +525,13 @@ export default function App() {
   const [editTx, setEditTx]         = useState(null);
   const [hasChanges, setHasChanges] = useState(false);
   const [syncing, setSyncing]       = useState(false);
+  const [modal, setModal]           = useState(null);
+  // modal: { title, body, confirmLabel, confirmClass, onConfirm, cancelLabel }
 
   const importInputRef = useRef();
+
+  const showModal = useCallback((opts) => setModal(opts), []);
+  const closeModal = useCallback(() => setModal(null), []);
 
   const toast = useCallback((msg, type = "success") => {
     const id = Date.now();
@@ -508,11 +552,11 @@ export default function App() {
         return;
       }
       // Web: try to restore from IDB on refresh
-      const [savedData, savedName] = await Promise.all([idbLoad(), idbLoadMeta()]);
+      const [savedData, meta] = await Promise.all([idbLoad(), idbLoadMeta()]);
       if (savedData !== null) {
         setTransactions(savedData);
-        setFileName(savedName || "");
-        setHasChanges(savedData.length > 0);
+        setFileName(meta.name || "");
+        setHasChanges(!meta.synced);   // only unsynced if not previously synced
         setStatus("ready");
         if (savedData.length > 0) toast(`Restored ${savedData.length} records`, "info");
       } else {
@@ -520,6 +564,20 @@ export default function App() {
       }
     })();
   }, []);
+
+  // ── beforeunload — warn if unsynced changes ─────────────────────────────
+  useEffect(() => {
+    if (IS_NATIVE) return;
+    const handler = (e) => {
+      if (hasChanges) {
+        e.preventDefault();
+        e.returnValue = "You have unsynced changes. Leave anyway?";
+        return e.returnValue;
+      }
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [hasChanges]);
 
   // ── persist — saves to IDB only ───────────────────────────────────────────
   const persist = useCallback(async (txList) => {
@@ -529,6 +587,7 @@ export default function App() {
       return;
     }
     await idbSave(txList);
+    await idbSaveMeta(await idbGet("fileName") || "", false);
     setHasChanges(true);
   }, [toast]);
 
@@ -550,7 +609,7 @@ export default function App() {
       setFileName(file.name);
       setTransactions(parsed);
       await idbSave(parsed);
-      await idbSaveMeta(file.name);
+      await idbSaveMeta(file.name, true);
       setHasChanges(false);
       setStatus("ready");
       toast(`Loaded "${file.name}" — ${parsed.length} records`, "success");
@@ -572,13 +631,27 @@ export default function App() {
   }, [toast]);
 
   // ── Switch File — back to welcome, clear everything ───────────────────────
-  const handleSwitchFile = useCallback(async () => {
-    await idbClear();
-    setTransactions([]);
-    setFileName("");
-    setHasChanges(false);
-    setStatus("welcome");
-  }, []);
+  const handleSwitchFile = useCallback(() => {
+    const doSwitch = async () => {
+      closeModal();
+      await idbClear();
+      setTransactions([]);
+      setFileName("");
+      setHasChanges(false);
+      setStatus("welcome");
+    };
+    if (hasChanges) {
+      showModal({
+        title: "Unsynced Changes",
+        body: "You have unsynced changes that will be lost if you switch files. Continue anyway?",
+        confirmLabel: "Switch Anyway",
+        confirmClass: "btn-danger",
+        onConfirm: doSwitch,
+      });
+    } else {
+      doSwitch();
+    }
+  }, [hasChanges, showModal, closeModal]);
 
   // ─────────────────────────────────────────────────────────────────────────
   // handleSync — opens Save picker every click, user picks file, we write directly
@@ -609,7 +682,7 @@ export default function App() {
       await writable.close();
 
       setFileName(handle.name);
-      await idbSaveMeta(handle.name);
+      await idbSaveMeta(handle.name, true);
       setHasChanges(false);
       toast(`✓ Saved to "${handle.name}" — ${currentTransactions.length} rows`, "success");
     } catch (err) {
@@ -653,7 +726,21 @@ export default function App() {
   }, [toast]);
 
   const handleMobileReset = useCallback(async () => {
-    if (!confirm("Delete ALL data and start over?")) return;
+    showModal({
+      title: "Reset All Data",
+      body: "This will permanently delete ALL transactions and cannot be undone. Are you sure?",
+      confirmLabel: "Yes, Delete All",
+      confirmClass: "btn-danger",
+      onConfirm: async () => {
+        closeModal();
+        await mobileStorage.clear();
+        setTransactions([]);
+        setFileName("");
+        setStatus("mobile-setup");
+        toast("All data cleared", "info");
+      },
+    });
+    return;
     await mobileStorage.clear();
     setTransactions([]);
     setFileName("");
@@ -682,14 +769,23 @@ export default function App() {
     toast("Transaction updated", "success");
   }, [persist, toast]);
 
-  const deleteTransaction = useCallback((id) => {
-    setTransactions(prev => {
-      const next = prev.filter(t => t.ID !== id);
-      persist(next);
-      return next;
+  const confirmDelete = useCallback((id) => {
+    showModal({
+      title: "Delete Transaction",
+      body: "Are you sure you want to delete this transaction? This cannot be undone.",
+      confirmLabel: "Delete",
+      confirmClass: "btn-danger",
+      onConfirm: () => {
+        closeModal();
+        setTransactions(prev => {
+          const next = prev.filter(t => t.ID !== id);
+          persist(next);
+          return next;
+        });
+        toast("Deleted", "success");
+      },
     });
-    toast("Deleted", "success");
-  }, [persist, toast]);
+  }, [showModal, closeModal, persist, toast]);
 
   const summary = useMemo(() => {
     const income  = transactions.filter(t=>t.Type==="Income").reduce((s,t)=>s+t.Amount,0);
@@ -721,7 +817,7 @@ export default function App() {
       <ListPage
         transactions={transactions}
         onEdit={tx=>{ setEditTx(tx); goPage("add"); }}
-        onDelete={deleteTransaction}
+        onDelete={confirmDelete}
         onSync={() => handleSync(transactions)}
         onDownload={() => handleDownload(transactions)}
         hasChanges={hasChanges}
@@ -810,6 +906,17 @@ export default function App() {
 
         <main className="main">{mainContent}</main>
         <Toast toasts={toasts}/>
+      {modal && (
+        <Modal
+          title={modal.title}
+          body={modal.body}
+          confirmLabel={modal.confirmLabel}
+          confirmClass={modal.confirmClass}
+          cancelLabel={modal.cancelLabel || "Cancel"}
+          onConfirm={modal.onConfirm}
+          onCancel={closeModal}
+        />
+      )}
       </div>
     </>
   );
@@ -1108,7 +1215,7 @@ function ListPage({ transactions, onEdit, onDelete, onSync, onDownload, hasChang
                   <td>
                     <div className="actions">
                       <button className="btn-icon" onClick={()=>onEdit(t)}><Pencil size={14}/></button>
-                      <button className="btn-icon del" onClick={()=>{ if(confirm("Delete this transaction?")) onDelete(t.ID); }}><Trash2 size={14}/></button>
+                      <button className="btn-icon del" onClick={()=>{ onDelete(t.ID); }}><Trash2 size={14}/></button>
                     </div>
                   </td>
                 </tr>
@@ -1133,7 +1240,7 @@ function ListPage({ transactions, onEdit, onDelete, onSync, onDownload, hasChang
                   </span>
                   <div className="actions">
                     <button className="btn-icon" onClick={()=>onEdit(t)}><Pencil size={14}/></button>
-                    <button className="btn-icon del" onClick={()=>{ if(confirm("Delete?")) onDelete(t.ID); }}><Trash2 size={14}/></button>
+                    <button className="btn-icon del" onClick={()=>{ onDelete(t.ID); }}><Trash2 size={14}/></button>
                   </div>
                 </div>
               </div>
