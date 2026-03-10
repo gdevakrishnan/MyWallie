@@ -15,8 +15,8 @@ import {
 import {
   LayoutDashboard, PlusCircle, List, BarChart2, FolderOpen,
   FilePlus, CheckCircle, XCircle, Info, Pencil, Trash2,
-  FileSpreadsheet, Wallet, CheckCheck, AlertTriangle,
-  Download, Upload, Share2,
+  FileSpreadsheet, Wallet, CheckCheck, Download, Upload,
+  Share2, RefreshCw,
 } from "lucide-react";
 import { Share } from "@capacitor/share";
 
@@ -26,70 +26,67 @@ dayjs.extend(isSameOrAfter);
 dayjs.extend(weekOfYear);
 
 // ─── Platform ─────────────────────────────────────────────────────────────────
-// Safe platform check: works correctly in dev AND production Capacitor/Vite builds
 const IS_NATIVE = (() => {
   try { return Capacitor.isNativePlatform(); } catch { return false; }
 })();
 const MOBILE_FILE      = "mywallie_data.xlsx";
 const MOBILE_READY_KEY = "mywallie_ready";
 
-// Safe localStorage helpers
 const safeLS = {
   get: (k)    => { try { return localStorage.getItem(k); }    catch { return null; } },
   set: (k, v) => { try { localStorage.setItem(k, v); }        catch {} },
   del: (k)    => { try { localStorage.removeItem(k); }         catch {} },
 };
 
-// ── Web data store (IndexedDB) ────────────────────────────────────────────────
-// Stores transaction data directly in IDB so it survives reloads without a
-// FileSystemFileHandle. The file handle is kept only for explicit "sync to file"
-// — it is NEVER required for normal add/edit/delete persistence.
-const WEB_IDB_DB      = "mywallie_db";
-const WEB_IDB_DATA    = "data";        // store: transaction data
-const WEB_IDB_HANDLES = "handles";     // store: FileSystemFileHandle
+// ─── IndexedDB ────────────────────────────────────────────────────────────────
+const WEB_IDB_DB   = "mywallie_db";
+const WEB_IDB_DATA = "data";
 
 function openWebIDB() {
   return new Promise((res, rej) => {
-    const r = indexedDB.open(WEB_IDB_DB, 2); // version 2 adds data store
+    const r = indexedDB.open(WEB_IDB_DB, 4);
     r.onupgradeneeded = (e) => {
       const db = e.target.result;
-      if (!db.objectStoreNames.contains(WEB_IDB_HANDLES)) db.createObjectStore(WEB_IDB_HANDLES);
-      if (!db.objectStoreNames.contains(WEB_IDB_DATA))    db.createObjectStore(WEB_IDB_DATA);
+      if (!db.objectStoreNames.contains(WEB_IDB_DATA)) db.createObjectStore(WEB_IDB_DATA);
     };
     r.onsuccess = (e) => res(e.target.result);
     r.onerror   = () => rej(r.error);
   });
 }
 
-// Save transactions to IDB (web equivalent of mobileStorage.save)
-async function webDataSave(transactions) {
+async function idbPut(key, value) {
   try {
     const db = await openWebIDB();
     await new Promise((res, rej) => {
       const tx = db.transaction(WEB_IDB_DATA, "readwrite");
-      tx.objectStore(WEB_IDB_DATA).put(JSON.stringify(transactions), "transactions");
+      tx.objectStore(WEB_IDB_DATA).put(typeof value === "string" ? value : JSON.stringify(value), key);
       tx.oncomplete = res; tx.onerror = () => rej(tx.error);
     });
-  } catch (e) { console.error("webDataSave failed", e); }
+  } catch {}
 }
 
-// Load transactions from IDB — returns null if nothing saved yet
-async function webDataLoad() {
+async function idbGet(key) {
   try {
     const db = await openWebIDB();
     return new Promise((res, rej) => {
-      const tx = db.transaction(WEB_IDB_DATA, "readonly");
-      const req = tx.objectStore(WEB_IDB_DATA).get("transactions");
-      req.onsuccess = () => {
-        const val = req.result;
-        res(val ? JSON.parse(val) : null);
-      };
-      req.onerror = () => rej(req.error);
+      const tx  = db.transaction(WEB_IDB_DATA, "readonly");
+      const req = tx.objectStore(WEB_IDB_DATA).get(key);
+      req.onsuccess = () => res(req.result ?? null);
+      req.onerror   = () => rej(req.error);
     });
   } catch { return null; }
 }
 
-async function webDataClear() {
+async function idbSave(transactions) { await idbPut("transactions", transactions); }
+async function idbLoad() {
+  const raw = await idbGet("transactions");
+  if (!raw) return null;
+  try { return JSON.parse(raw); } catch { return null; }
+}
+async function idbSaveMeta(fileName) { await idbPut("fileName", fileName); }
+async function idbLoadMeta() { return await idbGet("fileName"); }
+
+async function idbClear() {
   try {
     const db = await openWebIDB();
     await new Promise((res, rej) => {
@@ -102,7 +99,6 @@ async function webDataClear() {
 
 // ─── Mobile storage ───────────────────────────────────────────────────────────
 const mobileStorage = {
-  /** Load from internal storage. Returns [] on first run (file not found). */
   async load() {
     try {
       const { data } = await Filesystem.readFile({ path: MOBILE_FILE, directory: Directory.Data });
@@ -110,34 +106,16 @@ const mobileStorage = {
       const bytes  = new Uint8Array(binary.length);
       for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
       return excelService.parse(bytes.buffer);
-    } catch {
-      return []; // file not found — first run
-    }
+    } catch { return []; }
   },
-
-  /**
-   * Silently save to internal storage.
-   * This is the ONLY write path for add/edit/delete — it NEVER triggers a download.
-   */
   async save(transactions) {
     const base64 = toBase64(excelService.toBuffer(excelService.createWorkbook(transactions)));
-    await Filesystem.writeFile({
-      path: MOBILE_FILE, data: base64,
-      directory: Directory.Data, recursive: true,
-    });
+    await Filesystem.writeFile({ path: MOBILE_FILE, data: base64, directory: Directory.Data, recursive: true });
   },
-
-  /** Delete internal file + clear setup flag → returns user to setup screen */
   async clear() {
     try { await Filesystem.deleteFile({ path: MOBILE_FILE, directory: Directory.Data }); } catch {}
     safeLS.del(MOBILE_READY_KEY);
   },
-
-  /**
-   * Generate report → write to Cache → open Android share sheet.
-   * Uses Directory.Cache (no permissions) + @capacitor/share.
-   * This is the ONLY place a file is ever shared/downloaded on Android.
-   */
   async shareReport(reportTransactions, fileName) {
     const base64 = toBase64(excelService.toBuffer(excelService.generateReport(reportTransactions)));
     await Filesystem.writeFile({ path: fileName, data: base64, directory: Directory.Cache, recursive: true });
@@ -149,43 +127,6 @@ const mobileStorage = {
 function toBase64(buf) {
   return btoa(new Uint8Array(buf).reduce((d, b) => d + String.fromCharCode(b), ""));
 }
-
-// ─── IndexedDB handle store (web only) ───────────────────────────────────────
-// File handle persistence (web only — optional, for "sync back to file" feature)
-const IDB_HANDLE_KEY = "active_file_handle";
-async function handleSave(val) {
-  try {
-    const db = await openWebIDB();
-    await new Promise((r, j) => {
-      const t = db.transaction(WEB_IDB_HANDLES, "readwrite");
-      t.objectStore(WEB_IDB_HANDLES).put(val, IDB_HANDLE_KEY);
-      t.oncomplete = r; t.onerror = () => j(t.error);
-    });
-  } catch {}
-}
-async function handleLoad() {
-  try {
-    const db = await openWebIDB();
-    return new Promise((r, j) => {
-      const t = db.transaction(WEB_IDB_HANDLES, "readonly");
-      const q = t.objectStore(WEB_IDB_HANDLES).get(IDB_HANDLE_KEY);
-      q.onsuccess = () => r(q.result ?? null); q.onerror = () => j(q.error);
-    });
-  } catch { return null; }
-}
-async function handleClear() {
-  try {
-    const db = await openWebIDB();
-    await new Promise((r, j) => {
-      const t = db.transaction(WEB_IDB_HANDLES, "readwrite");
-      t.objectStore(WEB_IDB_HANDLES).delete(IDB_HANDLE_KEY);
-      t.oncomplete = r; t.onerror = () => j(t.error);
-    });
-  } catch {}
-}
-
-const LS_KEY = "mywallie_file_name";
-// Use safeLS wrapper defined above for all localStorage access
 
 // ─── Excel Service ────────────────────────────────────────────────────────────
 const SHEET_NAME = "Transactions";
@@ -208,13 +149,16 @@ const excelService = {
     const rows = XLSX.utils.sheet_to_json(ws, { header:1 });
     if (rows.length <= 1) return [];
     return rows.slice(1).filter(r => r[0]).map(r => ({
-      ID: String(r[0]||""),
-      Date: r[1] ? String(r[1]) : dayjs().format("YYYY-MM-DD"),
-      Type: r[2]||"Expense", Category: r[3]||"",
-      Amount: Number(r[4])||0, Notes: r[5]||"",
+      ID:        String(r[0]||""),
+      Date:      r[1] ? String(r[1]) : dayjs().format("YYYY-MM-DD"),
+      Type:      r[2]||"Expense",
+      Category:  r[3]||"",
+      Amount:    Number(r[4])||0,
+      Notes:     r[5]||"",
       CreatedAt: r[6]||new Date().toISOString(),
     }));
   },
+  // Full overwrite of the picked file handle
   async writeToHandle(handle, transactions) {
     const buf      = this.toBuffer(this.createWorkbook(transactions));
     const writable = await handle.createWritable();
@@ -288,10 +232,11 @@ const S = `
   .file-zone-label{font-size:0.7rem;color:var(--muted);font-family:'DM Mono',monospace;letter-spacing:0.1em;margin-bottom:10px}
   .file-btn{width:100%;padding:9px 12px;border-radius:var(--radius-sm);background:var(--surface2);border:1px dashed var(--border);color:var(--muted);font-size:0.8rem;font-family:'Syne',sans-serif;cursor:pointer;transition:all 0.18s;display:flex;align-items:center;gap:8px}
   .file-btn:hover{border-color:var(--accent);color:var(--accent)}
+  .file-btn:disabled{opacity:0.5;cursor:not-allowed}
   .file-btn.danger{border-color:rgba(247,77,138,0.3);color:var(--expense)}
   .file-btn.danger:hover{border-color:var(--expense);background:rgba(247,77,138,0.1)}
-  .file-status{font-size:0.72rem;color:var(--income);margin-top:8px;font-family:'DM Mono',monospace;line-height:1.6}
   .storage-badge{display:inline-flex;align-items:center;gap:6px;padding:5px 12px;border-radius:100px;font-size:0.7rem;font-family:'DM Mono',monospace;font-weight:600;background:rgba(77,247,200,0.1);color:var(--income);border:1px solid rgba(77,247,200,0.2);margin-top:6px}
+  .unsynced-badge{display:inline-flex;align-items:center;gap:6px;padding:5px 12px;border-radius:100px;font-size:0.7rem;font-family:'DM Mono',monospace;font-weight:600;background:rgba(247,77,138,0.1);color:var(--expense);border:1px solid rgba(247,77,138,0.25);margin-top:6px}
 
   .main{flex:1;padding:36px 40px;overflow-x:hidden;min-width:0}
   .page-header{margin-bottom:32px}
@@ -310,7 +255,9 @@ const S = `
   .card-sub{font-size:0.75rem;color:var(--muted);margin-top:6px}
 
   .table-wrap{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
-  .table-header{display:flex;align-items:center;justify-content:space-between;padding:18px 22px;border-bottom:1px solid var(--border)}
+  .table-header{display:flex;align-items:center;justify-content:space-between;padding:18px 22px;border-bottom:1px solid var(--border);gap:12px;flex-wrap:wrap}
+  .table-header-left{display:flex;align-items:center;gap:10px;min-width:0;flex-wrap:wrap}
+  .table-header-actions{display:flex;align-items:center;gap:8px;flex-shrink:0}
   .table-title{font-weight:700;font-size:1rem}
   .desktop-table table{width:100%;border-collapse:collapse}
   .desktop-table th{padding:13px 18px;text-align:left;font-size:0.72rem;color:var(--muted);font-family:'DM Mono',monospace;letter-spacing:0.1em;border-bottom:1px solid var(--border);background:var(--surface2)}
@@ -357,6 +304,21 @@ const S = `
   .btn-success{background:var(--income);color:#000}
   .btn-success:hover{filter:brightness(0.9)}
 
+  .btn-sm{display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border-radius:var(--radius-sm);border:none;cursor:pointer;font-family:'Syne',sans-serif;font-weight:700;font-size:0.82rem;transition:all 0.18s;white-space:nowrap}
+  .btn-sm:disabled{opacity:0.5;cursor:not-allowed;transform:none!important}
+  .btn-sync{background:rgba(124,106,247,0.14);color:var(--accent);border:1px solid rgba(124,106,247,0.3)}
+  .btn-sync:hover:not(:disabled){background:var(--accent);color:#fff;transform:translateY(-1px)}
+  .btn-sync.has-changes{background:rgba(124,106,247,0.22);border-color:var(--accent);animation:pulse-ring 2s infinite}
+  .btn-dl{background:rgba(77,247,200,0.1);color:var(--income);border:1px solid rgba(77,247,200,0.25)}
+  .btn-dl:hover{background:var(--income);color:#000;transform:translateY(-1px)}
+  @keyframes pulse-ring{0%,100%{box-shadow:0 0 0 2px rgba(124,106,247,0.2)}50%{box-shadow:0 0 0 7px rgba(124,106,247,0)}}
+  @keyframes spin{to{transform:rotate(360deg)}}
+
+  .unsynced-dot{width:7px;height:7px;border-radius:50%;display:inline-block;background:var(--expense);animation:blink-dot 1.3s ease-in-out infinite;flex-shrink:0}
+  @keyframes blink-dot{0%,100%{opacity:1}50%{opacity:0.2}}
+
+  .sync-hint{padding:9px 22px;border-bottom:1px solid var(--border);font-size:0.72rem;color:var(--muted);font-family:'DM Mono',monospace;display:flex;align-items:center;gap:7px;background:rgba(124,106,247,0.04)}
+
   .toast-wrap{position:fixed;bottom:28px;right:28px;z-index:999;display:flex;flex-direction:column;gap:10px}
   .toast{padding:13px 18px;border-radius:var(--radius-sm);font-size:0.85rem;font-weight:600;animation:slideIn 0.25s ease;min-width:240px;max-width:320px;display:flex;align-items:center;gap:10px}
   .toast.success{background:var(--income);color:#000}
@@ -385,7 +347,19 @@ const S = `
   ::-webkit-scrollbar-track{background:var(--bg)}
   ::-webkit-scrollbar-thumb{background:var(--surface3);border-radius:3px}
 
-  /* Setup screen */
+  /* Welcome screen */
+  .welcome-wrap{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:72vh;padding:0 20px;text-align:center}
+  .welcome-icon{color:var(--accent);margin-bottom:24px}
+  .welcome-title{font-size:2rem;font-weight:800;letter-spacing:-0.04em;margin-bottom:10px}
+  .welcome-sub{color:var(--muted);font-size:0.9rem;line-height:1.75;margin-bottom:44px;max-width:400px}
+  .welcome-choices{display:grid;grid-template-columns:1fr 1fr;gap:16px;width:100%;max-width:480px}
+  .welcome-choice{background:var(--surface);border:1.5px solid var(--border);border-radius:var(--radius);padding:32px 22px;cursor:pointer;transition:all 0.22s;display:flex;flex-direction:column;align-items:center;gap:14px}
+  .welcome-choice:hover{border-color:var(--accent);transform:translateY(-4px);box-shadow:0 12px 40px rgba(124,106,247,0.18)}
+  .welcome-choice-icon{color:var(--accent)}
+  .welcome-choice-title{font-size:1rem;font-weight:800}
+  .welcome-choice-sub{font-size:0.78rem;color:var(--muted);line-height:1.6;text-align:center}
+
+  /* Mobile setup */
   .setup-wrap{max-width:460px;margin:60px auto 0;text-align:center;padding:0 16px}
   .setup-icon{margin-bottom:20px;color:var(--accent)}
   .setup-title{font-size:1.5rem;font-weight:800;margin-bottom:8px}
@@ -396,17 +370,6 @@ const S = `
   .setup-choice-icon{margin-bottom:14px;color:var(--accent)}
   .setup-choice-title{font-size:0.95rem;font-weight:700;margin-bottom:6px}
   .setup-choice-sub{font-size:0.78rem;color:var(--muted);line-height:1.5}
-
-  /* Web welcome */
-  .reconnect-wrap{max-width:480px;margin:60px auto 0}
-  .reconnect-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:32px;text-align:center}
-  .reconnect-icon{margin-bottom:16px;color:var(--accent)}
-  .reconnect-title{font-size:1.2rem;font-weight:800;margin-bottom:8px}
-  .reconnect-sub{color:var(--muted);font-size:0.85rem;margin-bottom:8px;line-height:1.6}
-  .reconnect-filename{font-family:'DM Mono',monospace;font-size:0.85rem;color:var(--income);background:rgba(77,247,200,0.08);border:1px solid rgba(77,247,200,0.2);border-radius:8px;padding:8px 14px;margin-bottom:24px;display:inline-block}
-  .reconnect-actions{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
-  .file-input-label{display:inline-flex;align-items:center;gap:8px;padding:11px 22px;border-radius:var(--radius-sm);background:var(--accent);color:#fff;font-family:'Syne',sans-serif;font-weight:700;font-size:0.88rem;cursor:pointer;transition:all 0.18s;border:none}
-  .file-input-label:hover{background:#6a58e5;transform:translateY(-1px)}
 
   @media (max-width:768px){
     .sidebar{display:none}
@@ -428,8 +391,11 @@ const S = `
     .search-input{max-width:100%}
     .filter-buttons{justify-content:space-between}
     .filter-buttons .filter-btn{flex:1}
-    .setup-wrap,.reconnect-wrap{margin-top:24px}
+    .welcome-choices{grid-template-columns:1fr}
     .setup-choices{grid-template-columns:1fr}
+    .table-header{flex-direction:column;align-items:flex-start}
+    .btn-sm{padding:7px 12px;font-size:0.75rem}
+    .welcome-title{font-size:1.5rem}
   }
   @media (max-width:400px){
     .cards{grid-template-columns:1fr}
@@ -450,26 +416,55 @@ function Toast({ toasts }) {
   );
 }
 
-// ─── Android Setup Screen — shown once on first launch ───────────────────────
+// ─── Welcome Screen ───────────────────────────────────────────────────────────
+function WelcomeScreen({ onNew, onOpen }) {
+  return (
+    <div className="welcome-wrap">
+      <div className="welcome-icon"><FileSpreadsheet size={60} strokeWidth={1.2}/></div>
+      <div className="welcome-title">Welcome to MyWallie</div>
+      <div className="welcome-sub">
+        Track income and expenses. Start fresh or load an existing file.
+      </div>
+      <div className="welcome-choices">
+        <div className="welcome-choice" onClick={onNew}>
+          <div className="welcome-choice-icon"><FilePlus size={44} strokeWidth={1.3}/></div>
+          <div className="welcome-choice-title">New File</div>
+          <div className="welcome-choice-sub">
+            Start with a blank slate. Add transactions, then hit <strong>Sync to File</strong> to write them into an Excel file.
+          </div>
+        </div>
+        <div className="welcome-choice" onClick={onOpen}>
+          <div className="welcome-choice-icon"><FolderOpen size={44} strokeWidth={1.3}/></div>
+          <div className="welcome-choice-title">Open Existing File</div>
+          <div className="welcome-choice-sub">
+            Pick a <strong>.xlsx</strong> — all data loads instantly. Hit <strong>Sync to File</strong> anytime to write changes back.
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Mobile Setup ─────────────────────────────────────────────────────────────
 function MobileSetupScreen({ onNew, onImport }) {
   return (
     <div className="setup-wrap">
       <div className="setup-icon"><FileSpreadsheet size={56} strokeWidth={1.2}/></div>
       <div className="setup-title">Welcome to MyWallie</div>
       <div className="setup-sub">
-        Your data lives inside the app and saves automatically after every change.<br/>
+        Your data lives inside the app and saves automatically.<br/>
         Start fresh or bring in an existing Excel file.
       </div>
       <div className="setup-choices">
         <div className="setup-choice" onClick={onNew}>
           <div className="setup-choice-icon"><FilePlus size={38} strokeWidth={1.4}/></div>
           <div className="setup-choice-title">New File</div>
-          <div className="setup-choice-sub">Start with a clean slate. Everything saves automatically.</div>
+          <div className="setup-choice-sub">Start fresh. Saves automatically.</div>
         </div>
         <div className="setup-choice" onClick={onImport}>
           <div className="setup-choice-icon"><Upload size={38} strokeWidth={1.4}/></div>
           <div className="setup-choice-title">Import Excel</div>
-          <div className="setup-choice-sub">Pick an existing .xlsx from your device to load.</div>
+          <div className="setup-choice-sub">Pick an existing .xlsx from your device.</div>
         </div>
       </div>
     </div>
@@ -478,22 +473,21 @@ function MobileSetupScreen({ onNew, onImport }) {
 
 // ─── App ──────────────────────────────────────────────────────────────────────
 export default function App() {
-  const [page, setPage]                   = useState("dashboard");
-  const [transactions, setTransactions]   = useState([]);
-  const [fileLoaded, setFileLoaded]       = useState(false);
-  const [fileName, setFileName]           = useState(safeLS.get(LS_KEY) || "");
-  const [toasts, setToasts]               = useState([]);
-  const [editTx, setEditTx]               = useState(null);
-  // "restoring"    → checking storage on mount
-  // "mobile-setup" → Android first launch, awaiting user choice
-  // "idle"         → web, no file, show welcome cards
-  // "needs-pick"   → web, has filename but needs permission re-grant
-  // "ready"        → file loaded, show app
-  const [status, setStatus]               = useState("restoring");
+  const [page, setPage]                 = useState("dashboard");
+  const [transactions, setTransactions] = useState([]);
+  const [status, setStatus]             = useState("restoring");
+  // "restoring"    → startup
+  // "welcome"      → show New / Open choices
+  // "mobile-setup" → Android first launch
+  // "ready"        → working
 
-  const fileHandleRef  = useRef(null);
-  const webInputRef    = useRef();   // web <input type="file">
-  const importInputRef = useRef();   // Android import <input type="file">
+  const [fileName, setFileName]     = useState("");
+  const [toasts, setToasts]         = useState([]);
+  const [editTx, setEditTx]         = useState(null);
+  const [hasChanges, setHasChanges] = useState(false);
+  const [syncing, setSyncing]       = useState(false);
+
+  const importInputRef = useRef();
 
   const toast = useCallback((msg, type = "success") => {
     const id = Date.now();
@@ -505,100 +499,143 @@ export default function App() {
   useEffect(() => {
     (async () => {
       if (IS_NATIVE) {
-        // Android: check if first-ever launch
         const isReady = safeLS.get(MOBILE_READY_KEY);
         if (!isReady) { setStatus("mobile-setup"); return; }
         const parsed = await mobileStorage.load();
         setTransactions(parsed);
-        setFileLoaded(true);
         setStatus("ready");
         if (parsed.length > 0) toast(`${parsed.length} records loaded`, "success");
         return;
       }
-
-      // ── Web production-safe startup ──────────────────────────────────────
-      // Step 1: Always load data from IDB first — this ALWAYS works, no permission needed.
-      const saved = await webDataLoad();
-      if (saved !== null) {
-        // We have persisted data — restore it immediately
-        setTransactions(saved);
-        setFileLoaded(true);
+      // Web: try to restore from IDB on refresh
+      const [savedData, savedName] = await Promise.all([idbLoad(), idbLoadMeta()]);
+      if (savedData !== null) {
+        setTransactions(savedData);
+        setFileName(savedName || "");
+        setHasChanges(savedData.length > 0);
         setStatus("ready");
-        // Step 2: Silently try to re-attach the file handle (optional — for sync-to-file)
-        // If it fails (permission expired etc.) we just skip it — data is already loaded
-        try {
-          const handle = await handleLoad();
-          if (handle) {
-            const perm = await handle.queryPermission({ mode: "readwrite" });
-            if (perm === "granted") {
-              fileHandleRef.current = handle;
-              setFileName(handle.name || safeLS.get(LS_KEY) || "");
-            }
-            // else: handle exists but permission expired — that's fine, data is in IDB
-          }
-        } catch { /* ignore — handle is optional */ }
-        if (saved.length > 0) toast(`${saved.length} records loaded`, "success");
-        return;
-      }
-
-      // Step 3: No IDB data yet — check if user had a file before (legacy or fresh)
-      const storedName = safeLS.get(LS_KEY);
-      if (storedName) {
-        // Had a file before — offer to re-open it
-        setStatus("needs-pick");
+        if (savedData.length > 0) toast(`Restored ${savedData.length} records`, "info");
       } else {
-        // Truly fresh — show welcome screen
-        setStatus("idle");
+        setStatus("welcome");
       }
     })();
   }, []);
 
-  // ── persist — the ONLY write path for CRUD ────────────────────────────────
-  // On Android: silently saves to internal storage, never downloads anything.
-  // On web: writes to file handle, falls back to download only if permission lost.
+  // ── persist — saves to IDB only ───────────────────────────────────────────
   const persist = useCallback(async (txList) => {
     if (IS_NATIVE) {
-      // Android: silently write to internal storage — never downloads
       try { await mobileStorage.save(txList); }
       catch (err) { toast("Auto-save failed: " + err.message, "error"); }
       return;
     }
-
-    // Web: ALWAYS save to IDB first — guaranteed to work in production, no permissions
-    await webDataSave(txList);
-
-    // Then ALSO try to sync to the linked .xlsx file if the user has one open
-    // This is a bonus "keep the file in sync" — failure here is silent and non-blocking
-    if (fileHandleRef.current) {
-      try { await excelService.writeToHandle(fileHandleRef.current, txList); }
-      catch {
-        // Permission expired — clear the stale handle, data is safe in IDB
-        fileHandleRef.current = null;
-        await handleClear();
-      }
-    }
-    // Note: we NEVER auto-download on CRUD operations anymore.
-    // Downloads only happen from the explicit "Download Report" button in Reports.
+    await idbSave(txList);
+    setHasChanges(true);
   }, [toast]);
 
-  // ── Android: "New File" from setup screen ────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────────────
+  // handleOpenExisting — picks file, reads data, goes to ready
+  // ─────────────────────────────────────────────────────────────────────────
+  const handleOpenExisting = useCallback(async () => {
+    if (!("showOpenFilePicker" in window)) {
+      toast("File picker not supported in this browser", "error");
+      return;
+    }
+    try {
+      const [handle] = await window.showOpenFilePicker({
+        types: [{ description:"Excel Files", accept:{ "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":[".xlsx"] } }],
+        multiple: false,
+      });
+      const file   = await handle.getFile();
+      const parsed = excelService.parse(await file.arrayBuffer());
+      setFileName(file.name);
+      setTransactions(parsed);
+      await idbSave(parsed);
+      await idbSaveMeta(file.name);
+      setHasChanges(false);
+      setStatus("ready");
+      toast(`Loaded "${file.name}" — ${parsed.length} records`, "success");
+    } catch (err) {
+      if (err.name !== "AbortError") toast("Failed to open file: " + err.message, "error");
+    }
+  }, [toast]);
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // handleNewFile — blank, no file linked
+  // ─────────────────────────────────────────────────────────────────────────
+  const handleNewFile = useCallback(async () => {
+    await idbClear();
+    setFileName("");
+    setTransactions([]);
+    setHasChanges(false);
+    setStatus("ready");
+    toast("New file ready — add your first transaction!", "success");
+  }, [toast]);
+
+  // ── Switch File — back to welcome, clear everything ───────────────────────
+  const handleSwitchFile = useCallback(async () => {
+    await idbClear();
+    setTransactions([]);
+    setFileName("");
+    setHasChanges(false);
+    setStatus("welcome");
+  }, []);
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // handleSync — opens Save picker every click, user picks file, we write directly
+  // Uses showSaveFilePicker (writable handle, no stale-state issues)
+  // ─────────────────────────────────────────────────────────────────────────
+  const handleSync = useCallback(async (currentTransactions) => {
+    if (!("showSaveFilePicker" in window)) {
+      excelService.downloadFile(currentTransactions, fileName || "expenses.xlsx");
+      toast("Saved as download (file picker not supported in this browser)", "info");
+      return;
+    }
+
+    setSyncing(true);
+    try {
+      // Open Save picker — opens in the folder of the last synced file if available
+      const opts = {
+        suggestedName: fileName || "expenses.xlsx",
+        types: [{ description:"Excel Files", accept:{ "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":[".xlsx"] } }],
+      };
+      // startIn: "downloads" as fallback, or try to open near last file
+      try { opts.startIn = "downloads"; } catch {}
+
+      const handle = await window.showSaveFilePicker(opts);
+
+      const buf      = excelService.toBuffer(excelService.createWorkbook(currentTransactions));
+      const writable = await handle.createWritable();
+      await writable.write(new Blob([buf], { type:"application/octet-stream" }));
+      await writable.close();
+
+      setFileName(handle.name);
+      await idbSaveMeta(handle.name);
+      setHasChanges(false);
+      toast(`✓ Saved to "${handle.name}" — ${currentTransactions.length} rows`, "success");
+    } catch (err) {
+      if (err.name !== "AbortError") toast("Sync failed: " + err.message, "error");
+    }
+    setSyncing(false);
+  }, [fileName, toast]);
+
+  // ── handleDownload ────────────────────────────────────────────────────────
+  const handleDownload = useCallback((currentTransactions) => {
+    excelService.downloadFile(currentTransactions, fileName || "expenses.xlsx");
+    toast("Downloaded!", "success");
+  }, [fileName, toast]);
+
+  // ── Android ───────────────────────────────────────────────────────────────
   const handleMobileNew = useCallback(async () => {
     try {
       await mobileStorage.save([]);
       safeLS.set(MOBILE_READY_KEY, "1");
       setTransactions([]);
-      setFileLoaded(true);
       setStatus("ready");
-      toast("New file ready — add your first transaction!", "success");
-    } catch (err) {
-      toast("Setup failed: " + err.message, "error");
-    }
+      toast("New file ready!", "success");
+    } catch (err) { toast("Setup failed: " + err.message, "error"); }
   }, [toast]);
 
-  // ── Android: "Import Excel" from setup screen / sidebar ──────────────────
-  const triggerImport = useCallback(() => {
-    importInputRef.current?.click();
-  }, []);
+  const triggerImport = useCallback(() => { importInputRef.current?.click(); }, []);
 
   const handleImportChange = useCallback(async (e) => {
     const file = e.target.files?.[0];
@@ -606,89 +643,25 @@ export default function App() {
     e.target.value = "";
     try {
       const parsed = excelService.parse(await file.arrayBuffer());
-      // Save imported data to internal storage (this is the only write that happens)
       await mobileStorage.save(parsed);
       safeLS.set(MOBILE_READY_KEY, "1");
       setTransactions(parsed);
-      setFileLoaded(true);
+      setFileName(file.name);
       setStatus("ready");
       toast(`Imported "${file.name}" — ${parsed.length} records`, "success");
-    } catch (err) {
-      toast("Import failed: " + err.message, "error");
-    }
+    } catch (err) { toast("Import failed: " + err.message, "error"); }
   }, [toast]);
 
-  // ── Android: Reset all data → back to setup screen ───────────────────────
   const handleMobileReset = useCallback(async () => {
     if (!confirm("Delete ALL data and start over?")) return;
     await mobileStorage.clear();
     setTransactions([]);
-    setFileLoaded(false);
+    setFileName("");
     setStatus("mobile-setup");
     toast("All data cleared", "info");
   }, [toast]);
 
-  // ── Web: file input ───────────────────────────────────────────────────────
-  const handleWebFileChange = useCallback(async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    e.target.value = "";
-    try {
-      const parsed = excelService.parse(await file.arrayBuffer());
-      let handle = null;
-      if ("showOpenFilePicker" in window) {
-        try {
-          const [h] = await window.showOpenFilePicker({
-            types:[{ description:"Excel Files", accept:{ "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":[".xlsx"] } }],
-            multiple: false,
-          });
-          handle = h;
-        } catch {}
-      }
-      fileHandleRef.current = handle;
-      if (handle) await handleSave(handle); else await handleClear();
-      safeLS.set(LS_KEY, file.name);
-      setFileName(file.name);
-      // Save to IDB so data persists even if file handle permission expires later
-      await webDataSave(parsed);
-      setTransactions(parsed); setFileLoaded(true); setStatus("ready");
-      toast(`Loaded "${file.name}" — ${parsed.length} records`, "success");
-    } catch (err) {
-      toast("Failed to read file: " + err.message, "error");
-    }
-  }, [toast]);
-
-  const handleWebReconnect = useCallback(async () => {
-    const handle = fileHandleRef.current;
-    if (handle) {
-      try {
-        const perm = await handle.requestPermission({ mode:"readwrite" });
-        if (perm === "granted") {
-          const file   = await handle.getFile();
-          const parsed = excelService.parse(await file.arrayBuffer());
-          safeLS.set(LS_KEY, file.name);
-          setFileName(file.name);
-          await webDataSave(parsed);
-          setTransactions(parsed); setFileLoaded(true); setStatus("ready");
-          toast(`Resumed "${file.name}"`, "success");
-          return;
-        }
-      } catch {}
-    }
-    webInputRef.current?.click();
-  }, [toast]);
-
-  const handleWebNew = useCallback(async () => {
-    fileHandleRef.current = null;
-    await handleClear();
-    await webDataClear();
-    safeLS.del(LS_KEY);
-    setFileName("expenses.xlsx");
-    setTransactions([]); setFileLoaded(true); setStatus("ready");
-    toast("New file ready — add your first transaction!", "success");
-  }, [toast]);
-
-  // ── CRUD — all call persist() which NEVER downloads on Android ───────────
+  // ── CRUD ──────────────────────────────────────────────────────────────────
   const addTransaction = useCallback((tx) => {
     setTransactions(prev => {
       const next = [...prev, tx];
@@ -732,76 +705,38 @@ export default function App() {
   ];
   const goPage = (id) => { if (id!=="add") setEditTx(null); setPage(id); };
 
-  // ── Decide what to render ─────────────────────────────────────────────────
+  // ── Render ────────────────────────────────────────────────────────────────
   let mainContent;
 
   if (status === "restoring") {
     mainContent = <div className="loading" style={{ height:"60vh" }}>Loading…</div>;
-
   } else if (IS_NATIVE && status === "mobile-setup") {
     mainContent = <MobileSetupScreen onNew={handleMobileNew} onImport={triggerImport}/>;
-
-  } else if (!IS_NATIVE && !fileLoaded) {
-    if (status === "needs-pick") {
-      mainContent = (
-        <div className="reconnect-wrap">
-          <div className="reconnect-card">
-            <div className="reconnect-icon"><FolderOpen size={48} strokeWidth={1.5}/></div>
-            <div className="reconnect-title">Welcome back!</div>
-            <div className="reconnect-sub">Last used file:</div>
-            <div className="reconnect-filename">{fileName||"expenses.xlsx"}</div>
-            <div className="reconnect-sub" style={{ marginBottom:24 }}>
-              Click <strong>Open File</strong> to resume — the app needs permission to access it again.
-            </div>
-            <div className="reconnect-actions">
-              <button className="btn btn-primary" onClick={handleWebReconnect}><FolderOpen size={16}/> Open File</button>
-              <button className="btn btn-secondary" onClick={handleWebNew}>Start Fresh</button>
-            </div>
-          </div>
-        </div>
-      );
-    } else {
-      mainContent = (
-        <div className="setup-wrap">
-          <div className="setup-icon"><FileSpreadsheet size={56} strokeWidth={1.2}/></div>
-          <div className="setup-title">Welcome to MyWallie.</div>
-          <div className="setup-sub">
-            Open an existing Excel file or start fresh.<br/>
-            Changes save back to your file automatically — no re-downloading.
-          </div>
-          <div className="setup-choices">
-            <div className="setup-choice" onClick={() => webInputRef.current?.click()}>
-              <div className="setup-choice-icon"><FolderOpen size={38} strokeWidth={1.4}/></div>
-              <div className="setup-choice-title">Open File</div>
-              <div className="setup-choice-sub">Select an existing expenses.xlsx from your computer.</div>
-            </div>
-            <div className="setup-choice" onClick={handleWebNew}>
-              <div className="setup-choice-icon"><FilePlus size={38} strokeWidth={1.4}/></div>
-              <div className="setup-choice-title">New File</div>
-              <div className="setup-choice-sub">Start fresh. First save will download a copy.</div>
-            </div>
-          </div>
-        </div>
-      );
-    }
-
+  } else if (!IS_NATIVE && status === "welcome") {
+    mainContent = <WelcomeScreen onNew={handleNewFile} onOpen={handleOpenExisting}/>;
   } else {
     if      (page==="dashboard") mainContent = <DashboardPage summary={summary} transactions={transactions}/>;
-    else if (page==="add")       mainContent = <AddPage onAdd={addTransaction} onUpdate={updateTransaction} editTx={editTx}/>;
-    else if (page==="list")      mainContent = <ListPage transactions={transactions} onEdit={tx=>{ setEditTx(tx); goPage("add"); }} onDelete={deleteTransaction}/>;
-    else                         mainContent = <ReportsPage transactions={transactions} toast={toast}/>;
+    else if (page==="add")       mainContent = <AddPage onAdd={addTransaction} onUpdate={updateTransaction} editTx={editTx} transactions={transactions}/>;
+    else if (page==="list")      mainContent = (
+      <ListPage
+        transactions={transactions}
+        onEdit={tx=>{ setEditTx(tx); goPage("add"); }}
+        onDelete={deleteTransaction}
+        onSync={() => handleSync(transactions)}
+        onDownload={() => handleDownload(transactions)}
+        hasChanges={hasChanges}
+        syncing={syncing}
+        isNative={IS_NATIVE}
+        fileName={fileName}
+      />
+    );
+    else mainContent = <ReportsPage transactions={transactions} toast={toast}/>;
   }
 
   return (
     <>
       <style>{S}</style>
 
-      {/* Web file picker */}
-      {!IS_NATIVE && (
-        <input id="web-file-pick" ref={webInputRef} type="file" accept=".xlsx"
-          style={{ display:"none" }} onChange={handleWebFileChange}/>
-      )}
-      {/* Android import picker — hidden, works inside Capacitor WebView */}
       {IS_NATIVE && (
         <input ref={importInputRef} type="file" accept=".xlsx"
           style={{ display:"none" }} onChange={handleImportChange}/>
@@ -818,59 +753,50 @@ export default function App() {
               </button>
             ))}
           </nav>
+
           <div className="file-zone">
             <div className="file-zone-label">DATA FILE</div>
             {IS_NATIVE ? (
-              fileLoaded && (
+              status==="ready" && (
                 <>
-                  <div className="file-status">
-                    <CheckCircle size={11} style={{ display:"inline", color:"var(--income)" }}/>{" "}
-                    Internal Storage<br/>
+                  <div style={{ fontSize:"0.72rem", color:"var(--income)", fontFamily:"DM Mono,monospace", lineHeight:1.6, marginTop:8 }}>
+                    <CheckCircle size={11} style={{ display:"inline" }}/> Internal Storage<br/>
                     <span style={{ opacity:0.7 }}>{transactions.length} records · auto-saved</span>
                   </div>
                   <div className="storage-badge"><CheckCircle size={11}/> Auto-sync ON</div>
                   <div style={{ marginTop:12, display:"flex", flexDirection:"column", gap:8 }}>
-                    <button className="file-btn" onClick={triggerImport}>
-                      <Upload size={15}/> Import Excel
-                    </button>
-                    <button className="file-btn danger" onClick={handleMobileReset}>
-                      <Trash2 size={15}/> Reset Data
-                    </button>
+                    <button className="file-btn" onClick={triggerImport}><Upload size={15}/> Import Excel</button>
+                    <button className="file-btn danger" onClick={handleMobileReset}><Trash2 size={15}/> Reset Data</button>
                   </div>
                 </>
               )
-            ) : (
+            ) : status === "ready" ? (
               <>
-                {fileLoaded ? (
-                  <>
-                    <div className="file-status">
-                      {fileHandleRef.current && (
-                        <><br/><span style={{ opacity:0.7, fontSize:"0.68rem" }}>⇄ Syncing to {fileName}</span></>
-                      )}
-                    </div>
-                    <div className="storage-badge"><CheckCircle size={11}/> Auto-sync ON</div>
-                    <div style={{ marginTop:12, display:"flex", flexDirection:"column", gap:8 }}>
-                      <label className="file-btn" htmlFor="web-file-pick" style={{ cursor:"pointer" }}>
-                        <FolderOpen size={15}/> Link to File
-                      </label>
-                      <button className="file-btn" onClick={() => excelService.downloadFile(transactions, fileName || "expenses.xlsx")}>
-                        <Download size={15}/> Export .xlsx
-                      </button>
-                    </div>
-                  </>
-                ) : (
-                  // No data yet
-                  <>
-                    <label className="file-btn" htmlFor="web-file-pick" style={{ cursor:"pointer" }}>
-                      <FolderOpen size={15}/> Open File
-                    </label>
-                    <div style={{ marginTop:8 }}>
-                      <button className="file-btn" onClick={handleWebNew}><FilePlus size={15}/> New File</button>
-                    </div>
-                  </>
+                <div style={{ fontSize:"0.72rem", color:"var(--muted)", fontFamily:"DM Mono,monospace", lineHeight:1.6, marginTop:8 }}>
+                  {fileName
+                    ? <><span style={{ color:"var(--income)" }}>{fileName}</span><br/><span style={{ opacity:0.6, fontSize:"0.68rem" }}>{transactions.length} records in memory</span></>
+                    : <><span style={{ opacity:0.7 }}>No file linked</span><br/><span style={{ opacity:0.5, fontSize:"0.68rem" }}>Sync to write to a file</span></>
+                  }
+                </div>
+                {hasChanges && (
+                  <div className="unsynced-badge">
+                    <span className="unsynced-dot"/> Unsynced changes
+                  </div>
                 )}
+                <div style={{ marginTop:12, display:"flex", flexDirection:"column", gap:8 }}>
+                  <button className="file-btn" onClick={() => handleSync(transactions)} disabled={syncing}>
+                    <RefreshCw size={15} style={{ animation: syncing?"spin 0.8s linear infinite":"none" }}/>
+                    {syncing ? "Writing…" : "Sync to File"}
+                  </button>
+                  <button className="file-btn" onClick={() => handleDownload(transactions)}>
+                    <Download size={15}/> Download .xlsx
+                  </button>
+                  <button className="file-btn" onClick={handleSwitchFile}>
+                    <FolderOpen size={15}/> Switch File
+                  </button>
+                </div>
               </>
-            )}
+            ) : null}
           </div>
         </aside>
 
@@ -984,27 +910,53 @@ function DashboardPage({ summary, transactions }) {
 }
 
 // ─── Add / Edit ───────────────────────────────────────────────────────────────
-function AddPage({ onAdd, onUpdate, editTx }) {
+function AddPage({ onAdd, onUpdate, editTx, transactions }) {
   const getEmpty = () => ({ Date:dayjs().format("YYYY-MM-DD"), Type:"Expense", Category:"", Amount:"", Notes:"" });
-  const [form, setForm]     = useState(editTx||getEmpty());
-  const [errors, setErrors] = useState({});
+  const [form, setForm]         = useState(editTx||getEmpty());
+  const [errors, setErrors]     = useState({});
+  const [newCatMode, setNewCatMode] = useState(false);
 
-  useEffect(() => { setForm(editTx||getEmpty()); setErrors({}); }, [editTx]);
+  // Unique sorted categories from existing transactions
+  const existingCats = useMemo(() => {
+    const s = new Set((transactions||[]).map(t => t.Category).filter(Boolean));
+    return [...s].sort();
+  }, [transactions]);
+
+  useEffect(() => {
+    setForm(editTx||getEmpty());
+    setErrors({});
+    setNewCatMode(false);
+  }, [editTx]);
 
   const set = (k,v) => { setForm(f=>({...f,[k]:v})); setErrors(e=>({...e,[k]:""})); };
+
+  const handleCatSelect = (e) => {
+    const val = e.target.value;
+    if (val === "__new__") {
+      setNewCatMode(true);
+      set("Category", "");
+    } else {
+      setNewCatMode(false);
+      set("Category", val);
+    }
+  };
+
   const validate = () => {
     const e = {};
-    if (!form.Date) e.Date="Date required";
-    if (!form.Category.trim()) e.Category="Category required";
-    if (!form.Amount||isNaN(Number(form.Amount))||Number(form.Amount)<=0) e.Amount="Enter a positive amount";
+    if (!form.Date)            e.Date     = "Date required";
+    if (!form.Category.trim()) e.Category = "Category required";
+    if (!form.Amount||isNaN(Number(form.Amount))||Number(form.Amount)<=0) e.Amount = "Enter a positive amount";
     setErrors(e); return Object.keys(e).length===0;
   };
   const handleSubmit = () => {
     if (!validate()) return;
     const tx = { ...form, Amount:Number(form.Amount) };
     if (editTx) { onUpdate({ ...tx, ID:editTx.ID, CreatedAt:editTx.CreatedAt }); }
-    else { onAdd({ ...tx, ID:String(Date.now()), CreatedAt:new Date().toISOString() }); setForm(getEmpty()); }
+    else { onAdd({ ...tx, ID:String(Date.now()), CreatedAt:new Date().toISOString() }); setForm(getEmpty()); setNewCatMode(false); }
   };
+
+  // Determine what value the select should show
+  const selectVal = newCatMode ? "__new__" : (existingCats.includes(form.Category) ? form.Category : (form.Category ? "__new__" : ""));
 
   return (
     <div>
@@ -1016,7 +968,34 @@ function AddPage({ onAdd, onUpdate, editTx }) {
         <div className="form-grid">
           <div className="form-group"><label>Date</label><input type="date" value={form.Date} onChange={e=>set("Date",e.target.value)}/>{errors.Date&&<span style={{ color:"var(--expense)",fontSize:"0.75rem" }}>{errors.Date}</span>}</div>
           <div className="form-group"><label>Type</label><select value={form.Type} onChange={e=>set("Type",e.target.value)}><option value="Income">Income</option><option value="Expense">Expense</option></select></div>
-          <div className="form-group"><label>Category</label><input type="text" placeholder="e.g. Food, Salary, Rent…" value={form.Category} onChange={e=>set("Category",e.target.value)}/>{errors.Category&&<span style={{ color:"var(--expense)",fontSize:"0.75rem" }}>{errors.Category}</span>}</div>
+          <div className="form-group full">
+            <label>Category</label>
+            {existingCats.length > 0 && !newCatMode ? (
+              <select value={selectVal} onChange={handleCatSelect}>
+                <option value="">-- Select category --</option>
+                {existingCats.map(c => <option key={c} value={c}>{c}</option>)}
+                <option value="__new__">✚ New category…</option>
+              </select>
+            ) : (
+              <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+                <input
+                  type="text"
+                  placeholder="Type new category name…"
+                  value={form.Category}
+                  onChange={e=>set("Category",e.target.value)}
+                  style={{ flex:1 }}
+                  autoFocus
+                />
+                {existingCats.length > 0 && (
+                  <button type="button" className="btn btn-secondary" style={{ padding:"10px 14px", fontSize:"0.8rem" }}
+                    onClick={() => { setNewCatMode(false); set("Category",""); }}>
+                    Cancel
+                  </button>
+                )}
+              </div>
+            )}
+            {errors.Category&&<span style={{ color:"var(--expense)",fontSize:"0.75rem" }}>{errors.Category}</span>}
+          </div>
           <div className="form-group"><label>Amount (₹)</label><input type="number" min="0.01" step="0.01" placeholder="0.00" value={form.Amount} onChange={e=>set("Amount",e.target.value)}/>{errors.Amount&&<span style={{ color:"var(--expense)",fontSize:"0.75rem" }}>{errors.Amount}</span>}</div>
           <div className="form-group full"><label>Notes (optional)</label><textarea placeholder="Any additional details…" value={form.Notes} onChange={e=>set("Notes",e.target.value)}/></div>
         </div>
@@ -1032,30 +1011,90 @@ function AddPage({ onAdd, onUpdate, editTx }) {
 }
 
 // ─── Transaction List ─────────────────────────────────────────────────────────
-function ListPage({ transactions, onEdit, onDelete }) {
+function ListPage({ transactions, onEdit, onDelete, onSync, onDownload, hasChanges, syncing, isNative, fileName }) {
   const [search, setSearch]         = useState("");
   const [typeFilter, setTypeFilter] = useState("All");
+
   const filtered = useMemo(() =>
     [...transactions]
-      .filter(t=>typeFilter==="All"||t.Type===typeFilter)
-      .filter(t=>!search||t.Category.toLowerCase().includes(search.toLowerCase())||(t.Notes||"").toLowerCase().includes(search.toLowerCase()))
-      .sort((a,b)=>dayjs(b.Date).valueOf()-dayjs(a.Date).valueOf()),
-    [transactions,search,typeFilter]);
+      .filter(t => typeFilter==="All" || t.Type===typeFilter)
+      .filter(t => !search || t.Category.toLowerCase().includes(search.toLowerCase()) || (t.Notes||"").toLowerCase().includes(search.toLowerCase()))
+      .sort((a,b) => dayjs(b.Date).valueOf() - dayjs(a.Date).valueOf()),
+    [transactions, search, typeFilter]);
 
   return (
     <div>
-      <div className="page-header"><div className="page-title">Transactions</div><div className="page-sub">{transactions.length} total records</div></div>
+      <div className="page-header">
+        <div className="page-title">Transactions</div>
+        <div className="page-sub">{transactions.length} total records</div>
+      </div>
+
       <div className="filter-bar">
         <input className="search-input" type="text" placeholder="Search category or notes…" value={search} onChange={e=>setSearch(e.target.value)}/>
         <div className="filter-buttons">
-          {["All","Income","Expense"].map(t=><button key={t} className={`filter-btn ${typeFilter===t?"active":""}`} onClick={()=>setTypeFilter(t)}>{t}</button>)}
+          {["All","Income","Expense"].map(t=>(
+            <button key={t} className={`filter-btn ${typeFilter===t?"active":""}`} onClick={()=>setTypeFilter(t)}>{t}</button>
+          ))}
         </div>
       </div>
+
       {filtered.length===0 ? (
-        <div className="empty"><div className="empty-icon"><List size={48} strokeWidth={1.2}/></div><div className="empty-title">No transactions found</div><div>Try adjusting filters or add a new transaction</div></div>
+        <div className="empty">
+          <div className="empty-icon"><List size={48} strokeWidth={1.2}/></div>
+          <div className="empty-title">No transactions found</div>
+          <div>Try adjusting filters or add a new transaction</div>
+        </div>
       ) : (
         <div className="table-wrap">
-          <div className="table-header"><div className="table-title">All Transactions</div><span style={{ color:"var(--muted)",fontSize:"0.8rem",fontFamily:"DM Mono,monospace" }}>{filtered.length} shown</span></div>
+          <div className="table-header">
+            <div className="table-header-left">
+              <div className="table-title">All Transactions</div>
+              <span style={{ color:"var(--muted)", fontSize:"0.8rem", fontFamily:"DM Mono,monospace" }}>
+                {filtered.length} shown
+              </span>
+              {!isNative && hasChanges && (
+                <span style={{ display:"inline-flex", alignItems:"center", gap:5, fontSize:"0.72rem", color:"var(--expense)", fontFamily:"DM Mono,monospace" }}>
+                  <span className="unsynced-dot"/> unsynced
+                </span>
+              )}
+            </div>
+
+            {!isNative && (
+              <div className="table-header-actions">
+                {/* Sync — always opens picker, user picks file, we overwrite it */}
+                <button
+                  className={`btn-sm btn-sync${hasChanges ? " has-changes" : ""}`}
+                  onClick={onSync}
+                  disabled={syncing}
+                  title="Open file picker → select a .xlsx → all data is written into it"
+                >
+                  <RefreshCw size={14} style={{ animation: syncing ? "spin 0.8s linear infinite" : "none" }}/>
+                  {syncing ? "Writing…" : hasChanges ? "Sync to File ●" : "Sync to File"}
+                </button>
+
+                {/* Download — straight browser download, no picker */}
+                <button
+                  className="btn-sm btn-dl"
+                  onClick={onDownload}
+                  title="Download a snapshot .xlsx directly"
+                >
+                  <Download size={14}/> Download
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Hint bar */}
+          {!isNative && (
+            <div className="sync-hint">
+              <Info size={12} style={{ flexShrink:0 }}/>
+              <span>
+                <strong style={{ color:"var(--text)" }}>Sync to File</strong> — opens a file picker, you select which .xlsx to overwrite with current data.&ensp;
+                <strong style={{ color:"var(--text)" }}>Download</strong> — saves a snapshot directly to Downloads.
+              </span>
+            </div>
+          )}
+
           <div className="desktop-table">
             <table>
               <thead><tr><th>Date</th><th>Type</th><th>Category</th><th>Amount</th><th>Notes</th><th>Actions</th></tr></thead>
@@ -1066,22 +1105,36 @@ function ListPage({ transactions, onEdit, onDelete }) {
                   <td>{t.Category}</td>
                   <td><span className={`amount ${t.Type.toLowerCase()}`}>{t.Type==="Income"?"+":"−"}₹{t.Amount.toLocaleString()}</span></td>
                   <td style={{ color:"var(--muted)",fontSize:"0.82rem",maxWidth:200 }}>{t.Notes||"—"}</td>
-                  <td><div className="actions"><button className="btn-icon" onClick={()=>onEdit(t)}><Pencil size={14}/></button><button className="btn-icon del" onClick={()=>{ if(confirm("Delete this transaction?")) onDelete(t.ID); }}><Trash2 size={14}/></button></div></td>
+                  <td>
+                    <div className="actions">
+                      <button className="btn-icon" onClick={()=>onEdit(t)}><Pencil size={14}/></button>
+                      <button className="btn-icon del" onClick={()=>{ if(confirm("Delete this transaction?")) onDelete(t.ID); }}><Trash2 size={14}/></button>
+                    </div>
+                  </td>
                 </tr>
               ))}</tbody>
             </table>
           </div>
+
           <div className="mobile-cards-list">
             {filtered.map(t=>(
               <div key={t.ID} className="tx-card">
                 <div className="tx-card-left">
                   <div className="tx-card-cat">{t.Category}</div>
-                  <div className="tx-card-meta"><span className={`badge ${t.Type.toLowerCase()}`}>{t.Type}</span><span className="tx-card-date">{t.Date}</span></div>
+                  <div className="tx-card-meta">
+                    <span className={`badge ${t.Type.toLowerCase()}`}>{t.Type}</span>
+                    <span className="tx-card-date">{t.Date}</span>
+                  </div>
                   {t.Notes&&<div className="tx-card-notes">{t.Notes}</div>}
                 </div>
                 <div className="tx-card-right">
-                  <span className={`tx-card-amount amount ${t.Type.toLowerCase()}`}>{t.Type==="Income"?"+":"−"}₹{t.Amount.toLocaleString()}</span>
-                  <div className="actions"><button className="btn-icon" onClick={()=>onEdit(t)}><Pencil size={14}/></button><button className="btn-icon del" onClick={()=>{ if(confirm("Delete?")) onDelete(t.ID); }}><Trash2 size={14}/></button></div>
+                  <span className={`tx-card-amount amount ${t.Type.toLowerCase()}`}>
+                    {t.Type==="Income"?"+":"−"}₹{t.Amount.toLocaleString()}
+                  </span>
+                  <div className="actions">
+                    <button className="btn-icon" onClick={()=>onEdit(t)}><Pencil size={14}/></button>
+                    <button className="btn-icon del" onClick={()=>{ if(confirm("Delete?")) onDelete(t.ID); }}><Trash2 size={14}/></button>
+                  </div>
                 </div>
               </div>
             ))}
@@ -1113,23 +1166,15 @@ function ReportsPage({ transactions, toast }) {
     return Object.entries(map).map(([name,value])=>({name,value})).sort((a,b)=>b.value-a.value).slice(0,8);
   }, [filtered]);
 
-  // ── This is the ONLY place a file is ever exported ────────────────────────
   const handleDownload = async () => {
     const start = period==="custom" ? fromDate
       : dayjs().startOf(period==="daily"?"day":period==="weekly"?"week":period==="monthly"?"month":"year").format("YYYY-MM-DD");
     const end  = period==="custom" ? toDate : dayjs().format("YYYY-MM-DD");
     const name = `mywallie_report_${start}_${end}.xlsx`;
-
     if (IS_NATIVE) {
-      // Android: write to Cache, open native share sheet — zero permissions needed
-      try {
-        await mobileStorage.shareReport(filtered, name);
-      } catch (err) {
-        if (!err?.message?.toLowerCase().includes("cancel"))
-          toast("Share failed: " + err.message, "error");
-      }
+      try { await mobileStorage.shareReport(filtered, name); }
+      catch (err) { if (!err?.message?.toLowerCase().includes("cancel")) toast("Share failed: " + err.message, "error"); }
     } else {
-      // Web: standard browser download
       const buf = excelService.toBuffer(excelService.generateReport(filtered));
       saveAs(new Blob([buf]), name);
       toast("Report downloaded!", "success");
